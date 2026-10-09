@@ -326,6 +326,49 @@ function openCreateMenu(folderId, pathIds = []) {
   });
 }
 
+// Выбор места для записи: верхний уровень хранилища или любая папка
+function pickContainer({ folder, groups, currentId, onPick }) {
+  const childrenOf = (pid) =>
+    groups
+      .filter((g) => (g.parentId || null) === pid)
+      .sort((a, b) => a.createdAt - b.createdAt);
+
+  const items = [];
+  items.push(
+    el('button', {
+      type: 'button',
+      class: 'btn btn-block container-choice' + (currentId ? '' : ' selected'),
+      onClick: () => { m.close(); onPick(null); },
+    },
+      el('span', { class: 'container-main' },
+        el('span', {}, folder.name),
+        el('span', { class: 'muted' }, 'верхний уровень')
+      )
+    )
+  );
+
+  const walk = (pid, depth) => {
+    childrenOf(pid).forEach((g) => {
+      items.push(
+        el('button', {
+          type: 'button',
+          class: 'btn btn-block container-choice' + (currentId === g.id ? ' selected' : ''),
+          style: `padding-left:${14 + depth * 18}px`,
+          onClick: () => { m.close(); onPick(g.id); },
+        }, '📁 ' + g.name)
+      );
+      walk(g.id, depth + 1);
+    });
+  };
+  walk(null, 0);
+
+  const m = modal({
+    title: 'Переместить в…',
+    content: items,
+    actions: [{ label: 'Отмена', onClick: () => m.close() }],
+  });
+}
+
 // ===== Экран: запись (создание / редактирование) =====
 
 async function renderRecord(root, recordId, folderId, groupPath = []) {
@@ -337,14 +380,13 @@ async function renderRecord(root, recordId, folderId, groupPath = []) {
   if (!folder) { location.hash = '#/'; return; }
 
   const groups = await DB.groupsByFolder(fid);
-  const groupId = record
+  let groupId = record
     ? (record.groupId || null)
     : (groupPath.length ? groupPath[groupPath.length - 1] : null);
-  const pathIds = groupId ? pathIdsFor(groups, groupId) : [];
-  const backUrl = containerUrl(fid, pathIds);
-  const containerName = pathIds.length
-    ? (groups.find((g) => g.id === pathIds[pathIds.length - 1])?.name || folder.name)
-    : folder.name;
+  const backUrl = containerUrl(fid, groupId ? pathIdsFor(groups, groupId) : []);
+  const nameOf = (id) =>
+    id ? (groups.find((g) => g.id === id)?.name || folder.name) : folder.name;
+  const urlFor = (id) => containerUrl(fid, id ? pathIdsFor(groups, id) : []);
 
   // Загружаем списки для полей типа «Список»
   const lists = {};
@@ -458,8 +500,30 @@ async function renderRecord(root, recordId, folderId, groupPath = []) {
         };
     await DB.put('records', rec);
     toast('Сохранено');
-    location.hash = backUrl;
+    location.hash = urlFor(groupId);
   }
+
+  // Выбор места: верхний уровень хранилища или любая папка (можно переместить запись)
+  const placeValue = el('span', { class: 'place-value' }, nameOf(groupId));
+  const placeControl = groups.length
+    ? el('button', {
+        type: 'button',
+        class: 'place-row',
+        onClick: () => pickContainer({
+          folder,
+          groups,
+          currentId: groupId,
+          onPick: (id) => { groupId = id; placeValue.textContent = nameOf(id); },
+        }),
+      },
+        el('span', { class: 'place-icon' }, '📁'),
+        el('span', { class: 'place-main' },
+          el('span', { class: 'place-label' }, 'Место'),
+          placeValue
+        ),
+        el('span', { class: 'place-change' }, 'Переместить')
+      )
+    : el('p', { class: 'muted' }, `Место: ${nameOf(groupId)}`);
 
   const titleField = getTitleField(folder);
   const headerTitle = record
@@ -470,7 +534,7 @@ async function renderRecord(root, recordId, folderId, groupPath = []) {
     header({ title: headerTitle, color: folder.color, back: backUrl }),
     el('main', { class: 'content' },
       el('div', { class: 'form' },
-        el('p', { class: 'muted' }, `Место: ${containerName}`),
+        placeControl,
         formParts
       ),
       el('button', { type: 'button', class: 'btn btn-primary btn-block', onClick: save }, 'Сохранить'),
@@ -488,7 +552,7 @@ async function renderRecord(root, recordId, folderId, groupPath = []) {
               if (ok) {
                 await DB.del('records', record.id);
                 toast('Запись удалена');
-                location.hash = backUrl;
+                location.hash = urlFor(groupId);
               }
             },
           }, 'Удалить запись')
@@ -994,7 +1058,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.1.0. Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.2.0. Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(listsSection, backupSection, aboutSection);
