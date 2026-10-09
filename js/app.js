@@ -362,6 +362,13 @@ function pickContainer({ folder, groups, currentId, onPick }) {
   };
   walk(null, 0);
 
+  if (!groups.length) {
+    items.push(
+      el('p', { class: 'muted' },
+        'Папок пока нет. Создайте папку в хранилище — тогда записи можно будет в неё перемещать.')
+    );
+  }
+
   const m = modal({
     title: 'Переместить в…',
     content: items,
@@ -505,25 +512,23 @@ async function renderRecord(root, recordId, folderId, groupPath = []) {
 
   // Выбор места: верхний уровень хранилища или любая папка (можно переместить запись)
   const placeValue = el('span', { class: 'place-value' }, nameOf(groupId));
-  const placeControl = groups.length
-    ? el('button', {
-        type: 'button',
-        class: 'place-row',
-        onClick: () => pickContainer({
-          folder,
-          groups,
-          currentId: groupId,
-          onPick: (id) => { groupId = id; placeValue.textContent = nameOf(id); },
-        }),
-      },
-        el('span', { class: 'place-icon' }, '📁'),
-        el('span', { class: 'place-main' },
-          el('span', { class: 'place-label' }, 'Место'),
-          placeValue
-        ),
-        el('span', { class: 'place-change' }, 'Переместить')
-      )
-    : el('p', { class: 'muted' }, `Место: ${nameOf(groupId)}`);
+  const placeControl = el('button', {
+    type: 'button',
+    class: 'place-row',
+    onClick: () => pickContainer({
+      folder,
+      groups,
+      currentId: groupId,
+      onPick: (id) => { groupId = id; placeValue.textContent = nameOf(id); },
+    }),
+  },
+    el('span', { class: 'place-icon' }, '📁'),
+    el('span', { class: 'place-main' },
+      el('span', { class: 'place-label' }, 'Место'),
+      placeValue
+    ),
+    el('span', { class: 'place-change' }, 'Переместить')
+  );
 
   const titleField = getTitleField(folder);
   const headerTitle = record
@@ -1058,7 +1063,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.2.0. Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.2.1. Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(listsSection, backupSection, aboutSection);
