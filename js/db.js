@@ -1,7 +1,7 @@
 // ===== Слой данных: IndexedDB =====
 
 const DB_NAME = 'info-storage';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -17,6 +17,11 @@ function open() {
         if (!db.objectStoreNames.contains('records')) {
           const store = db.createObjectStore('records', { keyPath: 'id' });
           store.createIndex('folderId', 'folderId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('groups')) {
+          const store = db.createObjectStore('groups', { keyPath: 'id' });
+          store.createIndex('folderId', 'folderId', { unique: false });
+          store.createIndex('parentId', 'parentId', { unique: false });
         }
         if (!db.objectStoreNames.contains('lists')) {
           db.createObjectStore('lists', { keyPath: 'id' });
@@ -74,24 +79,57 @@ export async function deleteRecordsByFolder(folderId) {
   await Promise.all(records.map((r) => wrap(store.delete(r.id))));
 }
 
+// ===== Папки внутри хранилища =====
+
+export async function groupsByFolder(folderId) {
+  const store = await getStore('groups', 'readonly');
+  return wrap(store.index('folderId').getAll(folderId));
+}
+
+export async function deleteGroupsByFolder(folderId) {
+  const groups = await groupsByFolder(folderId);
+  const store = await getStore('groups', 'readwrite');
+  await Promise.all(groups.map((g) => wrap(store.delete(g.id))));
+}
+
+// Удалить папку вместе со всеми вложенными папками и записями в них
+export async function deleteGroupDeep(groupId) {
+  const [records, groups] = await Promise.all([getAll('records'), getAll('groups')]);
+  const collect = (id) => {
+    const kids = groups.filter((g) => g.parentId === id).map((g) => g.id);
+    return kids.flatMap((k) => [k, ...collect(k)]);
+  };
+  const ids = new Set([groupId, ...collect(groupId)]);
+
+  const recStore = await getStore('records', 'readwrite');
+  await Promise.all(
+    records.filter((r) => ids.has(r.groupId)).map((r) => wrap(recStore.delete(r.id)))
+  );
+
+  const grpStore = await getStore('groups', 'readwrite');
+  await Promise.all([...ids].map((id) => wrap(grpStore.delete(id))));
+}
+
 // ===== Экспорт / импорт =====
 
 export async function exportAll() {
   return {
     app: 'info-storage',
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     folders: await getAll('folders'),
+    groups: await getAll('groups'),
     records: await getAll('records'),
     lists: await getAll('lists'),
   };
 }
 
 export async function importAll(data) {
-  for (const name of ['folders', 'records', 'lists']) {
+  for (const name of ['folders', 'groups', 'records', 'lists']) {
     await wrap((await getStore(name, 'readwrite')).clear());
   }
   for (const folder of data.folders) await put('folders', folder);
+  for (const group of data.groups || []) await put('groups', group);
   for (const record of data.records) await put('records', record);
   for (const list of data.lists) await put('lists', list);
 }

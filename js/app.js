@@ -44,6 +44,10 @@ function fab(href, label) {
   return el('a', { class: 'fab', href, 'aria-label': label, title: label }, '＋');
 }
 
+function fabAction(onClick, label) {
+  return el('button', { class: 'fab', type: 'button', 'aria-label': label, title: label, onClick }, '＋');
+}
+
 function getTitleField(folder) {
   return (
     folder.fields.find((f) => f.isTitle && f.type === 'text') ||
@@ -52,17 +56,46 @@ function getTitleField(folder) {
   );
 }
 
-// ===== Экран: главная (список папок) =====
+// Ссылка на контейнер внутри хранилища: само хранилище или папка (по пути из id)
+function containerUrl(folderId, pathIds = []) {
+  return `#/folder/${folderId}` + (pathIds.length ? '/' + pathIds.join('/') : '');
+}
+
+// Путь (массив id) от корня хранилища до указанной папки
+function pathIdsFor(groups, groupId) {
+  const byId = new Map(groups.map((g) => [g.id, g]));
+  const ids = [];
+  let cur = byId.get(groupId);
+  while (cur) {
+    ids.unshift(cur.id);
+    cur = cur.parentId ? byId.get(cur.parentId) : null;
+  }
+  return ids;
+}
+
+// Подпись вида «2 папки · 5 записей»
+function summary(groupCount, recordCount) {
+  const parts = [];
+  if (groupCount) parts.push(plural(groupCount, 'папка', 'папки', 'папок'));
+  parts.push(plural(recordCount, 'запись', 'записи', 'записей'));
+  return parts.join(' · ');
+}
+
+// ===== Экран: главная (список хранилищ) =====
 
 async function renderHome(root) {
-  const [folders, records] = await Promise.all([DB.getAll('folders'), DB.getAll('records')]);
+  const [folders, records, groups] = await Promise.all([
+    DB.getAll('folders'), DB.getAll('records'), DB.getAll('groups'),
+  ]);
   const counts = {};
   records.forEach((r) => { counts[r.folderId] = (counts[r.folderId] || 0) + 1; });
+  const groupCounts = {};
+  groups.forEach((g) => { groupCounts[g.folderId] = (groupCounts[g.folderId] || 0) + 1; });
   folders.sort((a, b) => a.createdAt - b.createdAt);
 
   root.append(
     header({
-      title: 'Хранилище',
+      title: 'Хранилища',
       actions: [{ icon: '⚙', href: '#/settings', label: 'Настройки' }],
     })
   );
@@ -73,8 +106,8 @@ async function renderHome(root) {
     main.append(
       el('div', { class: 'empty' },
         el('div', { class: 'empty-icon' }, '🗂️'),
-        el('p', {}, 'Папок пока нет.'),
-        el('p', {}, 'Нажмите ＋, чтобы создать первую.')
+        el('p', {}, 'Хранилищ пока нет.'),
+        el('p', {}, 'Нажмите ＋, чтобы создать первое.')
       )
     );
   } else {
@@ -89,45 +122,88 @@ async function renderHome(root) {
             el('span', { class: 'folder-color' }),
             el('span', { class: 'folder-name' }, f.name),
             el('span', { class: 'folder-count' },
-              plural(counts[f.id] || 0, 'запись', 'записи', 'записей'))
+              summary(groupCounts[f.id] || 0, counts[f.id] || 0))
           )
         )
       )
     );
   }
 
-  root.append(main, fab('#/new-folder', 'Создать папку'));
+  root.append(main, fab('#/new-folder', 'Создать хранилище'));
 }
 
-// ===== Экран: папка (список записей) =====
+// ===== Экран: хранилище или папка (список папок и записей) =====
 
-async function renderFolder(root, id) {
-  const folder = await DB.get('folders', id);
+async function renderFolder(root, folderId, groupPath = []) {
+  const folder = await DB.get('folders', folderId);
   if (!folder) { location.hash = '#/'; return; }
 
-  const records = await DB.recordsByFolder(id);
-  const titleField = getTitleField(folder);
-  const selectField = folder.fields.find((f) => f.type === 'select');
+  const groups = await DB.groupsByFolder(folderId);
+  const allRecords = await DB.recordsByFolder(folderId);
+
+  // Восстанавливаем путь и проверяем, что он корректен
+  const path = [];
+  let parentId = null;
+  for (const gid of groupPath) {
+    const g = groups.find((x) => x.id === gid && x.parentId === parentId);
+    if (!g) { location.hash = containerUrl(folderId); return; }
+    path.push(g);
+    parentId = g.id;
+  }
+  const current = path.length ? path[path.length - 1] : null;
+  const currentId = current ? current.id : null;
+  const pathIds = path.map((g) => g.id);
+
+  const childGroups = groups
+    .filter((g) => g.parentId === currentId)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const records = allRecords.filter((r) => (r.groupId || null) === currentId);
+
+  const childrenOf = (pid) => groups.filter((g) => g.parentId === pid);
+  const directRecords = (gid) => allRecords.filter((r) => (r.groupId || null) === gid).length;
+  const subtreeRecords = (gid) =>
+    directRecords(gid) + childrenOf(gid).reduce((s, c) => s + subtreeRecords(c.id), 0);
 
   let search = '';
   let filterValue = '';
+  const selectField = folder.fields.find((f) => f.type === 'select');
 
   root.append(
     header({
-      title: folder.name,
+      title: current ? current.name : folder.name,
       color: folder.color,
-      back: '#/',
-      actions: [{ icon: '✎', href: `#/folder/${id}/edit`, label: 'Изменить папку' }],
+      back: current ? containerUrl(folderId, pathIds.slice(0, -1)) : '#/',
+      actions: current
+        ? [{ icon: '✎', href: `#/edit-group/${current.id}`, label: 'Изменить папку' }]
+        : [{ icon: '✎', href: `#/folder/${folderId}/edit`, label: 'Изменить хранилище' }],
     })
   );
 
+  const main = el('main', { class: 'content' });
+
+  // Хлебные крошки
+  const crumbs = el('div', { class: 'breadcrumbs' });
+  const addCrumb = (label, href, isCurrent) => {
+    if (crumbs.childNodes.length) crumbs.append(el('span', { class: 'crumb-sep' }, '/'));
+    crumbs.append(
+      href && !isCurrent
+        ? el('a', { class: 'crumb', href }, label)
+        : el('span', { class: 'crumb current' }, label)
+    );
+  };
+  addCrumb(folder.name, containerUrl(folderId), !current);
+  path.forEach((g, i) => {
+    addCrumb(g.name, containerUrl(folderId, pathIds.slice(0, i + 1)), i === path.length - 1);
+  });
+  main.append(crumbs);
+
+  // Поиск и фильтр (по записям текущего контейнера)
   const searchInput = el('input', {
     class: 'search-input',
     type: 'search',
     placeholder: 'Поиск…',
     onInput: (e) => { search = e.target.value; renderList(); },
   });
-
   const controls = el('div', { class: 'controls' }, searchInput);
 
   if (selectField) {
@@ -143,16 +219,14 @@ async function renderFolder(root, id) {
       )
     );
   }
+  main.append(controls);
 
   const listEl = el('div', { class: 'record-list' });
+  main.append(listEl);
 
-  function recordText(r) {
-    return (
-      folder.fields.map((f) => String(r.values[f.id] ?? '')).join(' ') +
-      ' ' +
-      (r.note || '')
-    );
-  }
+  const titleField = getTitleField(folder);
+  const recordText = (r) =>
+    folder.fields.map((f) => String(r.values[f.id] ?? '')).join(' ') + ' ' + (r.note || '');
 
   function renderList() {
     const q = search.trim().toLowerCase();
@@ -167,49 +241,110 @@ async function renderFolder(root, id) {
     );
 
     listEl.innerHTML = '';
-    if (rows.length === 0) {
-      listEl.append(
-        el('div', { class: 'empty' },
-          el('p', {}, records.length === 0 ? 'Записей пока нет.' : 'Ничего не найдено.'))
-      );
-      return;
+
+    // Папки
+    if (childGroups.length) {
+      listEl.append(el('div', { class: 'section-title' }, 'Папки'));
+      childGroups.forEach((g) => {
+        const gc = childrenOf(g.id).length;
+        const rc = subtreeRecords(g.id);
+        listEl.append(
+          el('a', {
+            class: 'group-row',
+            href: containerUrl(folderId, [...pathIds, g.id]),
+            style: `--folder-color:${folder.color}`,
+          },
+            el('span', { class: 'group-icon' }, '📁'),
+            el('span', { class: 'group-main' },
+              el('span', { class: 'group-name' }, g.name),
+              el('span', { class: 'group-sub' }, gc || rc ? summary(gc, rc) : 'пусто')
+            ),
+            el('span', { class: 'group-chevron' }, '›')
+          )
+        );
+      });
     }
 
-    rows.forEach((r, i) => {
-      const title = String(r.values[titleField?.id] ?? '').trim() || 'Без названия';
-      const loc = selectField ? String(r.values[selectField.id] ?? '') : '';
+    // Записи
+    if (rows.length) {
+      if (childGroups.length) listEl.append(el('div', { class: 'section-title' }, 'Записи'));
+      rows.forEach((r, i) => {
+        const title = String(r.values[titleField?.id] ?? '').trim() || 'Без названия';
+        const loc = selectField ? String(r.values[selectField.id] ?? '') : '';
+        listEl.append(
+          el('a', {
+            class: 'record-row',
+            href: `#/record/${r.id}`,
+            style: `--folder-color:${folder.color}`,
+          },
+            el('span', { class: 'record-num' }, String(i + 1)),
+            el('span', { class: 'record-main' },
+              el('span', { class: 'record-title' }, title),
+              loc ? el('span', { class: 'record-sub' }, loc) : null
+            ),
+            el('span', { class: 'record-chevron' }, '›')
+          )
+        );
+      });
+    }
+
+    if (!childGroups.length && rows.length === 0) {
       listEl.append(
-        el('a', {
-          class: 'record-row',
-          href: `#/record/${r.id}`,
-          style: `--folder-color:${folder.color}`,
-        },
-          el('span', { class: 'record-num' }, String(i + 1)),
-          el('span', { class: 'record-main' },
-            el('span', { class: 'record-title' }, title),
-            loc ? el('span', { class: 'record-sub' }, loc) : null
-          ),
-          el('span', { class: 'record-chevron' }, '›')
+        el('div', { class: 'empty' },
+          el('p', {}, records.length === 0 ? 'Здесь пока пусто.' : 'Ничего не найдено.'),
+          records.length === 0
+            ? el('p', {}, 'Нажмите ＋, чтобы создать папку или запись.')
+            : null
         )
       );
-    });
+    }
   }
 
   renderList();
-  root.append(
-    el('main', { class: 'content' }, controls, listEl),
-    fab(`#/new-record/${id}`, 'Добавить запись')
-  );
+  root.append(main, fabAction(() => openCreateMenu(folderId, pathIds), 'Создать'));
+}
+
+// Меню создания: папка или запись
+function openCreateMenu(folderId, pathIds = []) {
+  const suffix = pathIds.length ? '/' + pathIds.join('/') : '';
+  const go = (hash) => { m.close(); location.hash = hash; };
+  const m = modal({
+    title: 'Что создать?',
+    content: [
+      el('button', {
+        type: 'button',
+        class: 'btn btn-block create-choice',
+        onClick: () => go(`#/new-group/${folderId}${suffix}`),
+      }, '📁 Папка'),
+      el('button', {
+        type: 'button',
+        class: 'btn btn-block create-choice',
+        onClick: () => go(`#/new-record/${folderId}${suffix}`),
+      }, '📝 Запись'),
+    ],
+    actions: [{ label: 'Отмена', onClick: () => m.close() }],
+  });
 }
 
 // ===== Экран: запись (создание / редактирование) =====
 
-async function renderRecord(root, recordId, folderId) {
+async function renderRecord(root, recordId, folderId, groupPath = []) {
   const record = recordId ? await DB.get('records', recordId) : null;
   if (recordId && !record) { location.hash = '#/'; return; }
 
-  const folder = await DB.get('folders', record ? record.folderId : folderId);
+  const fid = record ? record.folderId : folderId;
+  const folder = await DB.get('folders', fid);
   if (!folder) { location.hash = '#/'; return; }
+
+  const groups = await DB.groupsByFolder(fid);
+  const groupId = record
+    ? (record.groupId || null)
+    : (groupPath.length ? groupPath[groupPath.length - 1] : null);
+  const pathIds = groupId ? pathIdsFor(groups, groupId) : [];
+  const backUrl = containerUrl(fid, pathIds);
+  const containerName = pathIds.length
+    ? (groups.find((g) => g.id === pathIds[pathIds.length - 1])?.name || folder.name)
+    : folder.name;
 
   // Загружаем списки для полей типа «Список»
   const lists = {};
@@ -316,11 +451,14 @@ async function renderRecord(root, recordId, folderId) {
     }
     const now = Date.now();
     const rec = record
-      ? { ...record, values, note: noteInput.value.trim(), updatedAt: now }
-      : { id: DB.uid(), folderId: folder.id, values, note: noteInput.value.trim(), createdAt: now, updatedAt: now };
+      ? { ...record, values, note: noteInput.value.trim(), groupId, updatedAt: now }
+      : {
+          id: DB.uid(), folderId: fid, groupId, values,
+          note: noteInput.value.trim(), createdAt: now, updatedAt: now,
+        };
     await DB.put('records', rec);
     toast('Сохранено');
-    location.hash = `#/folder/${folder.id}`;
+    location.hash = backUrl;
   }
 
   const titleField = getTitleField(folder);
@@ -329,9 +467,12 @@ async function renderRecord(root, recordId, folderId) {
     : 'Новая запись';
 
   root.append(
-    header({ title: headerTitle, color: folder.color, back: `#/folder/${folder.id}` }),
+    header({ title: headerTitle, color: folder.color, back: backUrl }),
     el('main', { class: 'content' },
-      el('div', { class: 'form' }, formParts),
+      el('div', { class: 'form' },
+        el('p', { class: 'muted' }, `Место: ${containerName}`),
+        formParts
+      ),
       el('button', { type: 'button', class: 'btn btn-primary btn-block', onClick: save }, 'Сохранить'),
       record
         ? el('button', {
@@ -347,10 +488,93 @@ async function renderRecord(root, recordId, folderId) {
               if (ok) {
                 await DB.del('records', record.id);
                 toast('Запись удалена');
-                location.hash = `#/folder/${folder.id}`;
+                location.hash = backUrl;
               }
             },
           }, 'Удалить запись')
+        : null
+    )
+  );
+}
+
+// ===== Экран: создание / редактирование папки =====
+
+async function renderGroupEditor(root, groupId, folderId, parentPath = []) {
+  let existing = null;
+  let fid = folderId;
+  let parentIds = parentPath;
+
+  if (groupId) {
+    existing = await DB.get('groups', groupId);
+    if (!existing) { location.hash = '#/'; return; }
+    fid = existing.folderId;
+    const groups = await DB.groupsByFolder(fid);
+    parentIds = pathIdsFor(groups, existing.id).slice(0, -1);
+  }
+
+  const folder = await DB.get('folders', fid);
+  if (!folder) { location.hash = '#/'; return; }
+  const parentId = parentIds.length ? parentIds[parentIds.length - 1] : null;
+
+  const nameInput = el('input', {
+    class: 'input',
+    type: 'text',
+    placeholder: 'Например: Принтеры, 1 этаж, корпус А',
+    value: existing ? existing.name : '',
+  });
+
+  async function save() {
+    const name = nameInput.value.trim();
+    if (!name) { toast('Введите название папки'); nameInput.focus(); return; }
+    if (existing) {
+      await DB.put('groups', { ...existing, name });
+      toast('Папка обновлена');
+      location.hash = containerUrl(fid, [...parentIds, existing.id]);
+    } else {
+      const g = { id: DB.uid(), folderId: fid, parentId, name, createdAt: Date.now() };
+      await DB.put('groups', g);
+      toast('Папка создана');
+      location.hash = containerUrl(fid, [...parentIds, g.id]);
+    }
+  }
+
+  root.append(
+    header({
+      title: existing ? 'Изменить папку' : 'Новая папка',
+      color: folder.color,
+      back: containerUrl(fid, parentIds),
+    }),
+    el('main', { class: 'content' },
+      el('div', { class: 'form' },
+        el('div', { class: 'field-group' },
+          el('label', { class: 'field-label' }, 'Название'),
+          nameInput
+        ),
+        el('p', { class: 'muted' },
+          'Папка нужна, чтобы разделять записи внутри хранилища. Поля записей берутся из хранилища и не меняются.')
+      ),
+      el('button', { type: 'button', class: 'btn btn-primary btn-block', onClick: save },
+        existing ? 'Сохранить изменения' : 'Создать папку'),
+      existing
+        ? el('div', { class: 'danger-zone' },
+            el('button', {
+              type: 'button',
+              class: 'btn btn-danger btn-block',
+              onClick: async () => {
+                const ok = await confirmModal({
+                  title: 'Удалить папку?',
+                  text: 'Будут удалены папка, все вложенные папки и записи в них. Действие нельзя отменить.',
+                  okText: 'Удалить',
+                  danger: true,
+                });
+                if (ok) {
+                  await DB.deleteGroupDeep(existing.id);
+                  toast('Папка удалена');
+                  location.hash = containerUrl(fid, parentIds);
+                }
+              },
+            }, 'Удалить папку')
+          )
         : null
     )
   );
@@ -455,7 +679,7 @@ function editField(existing, lists) {
   });
 }
 
-// ===== Экран: конструктор папки =====
+// ===== Экран: конструктор хранилища =====
 
 async function renderFolderEditor(root, folderId) {
   const existing = folderId ? await DB.get('folders', folderId) : null;
@@ -467,7 +691,7 @@ async function renderFolderEditor(root, folderId) {
 
   const nameInput = el('input', {
     class: 'input', type: 'text',
-    placeholder: 'Например: Сотрудники',
+    placeholder: 'Например: Оборудование',
     value: folder.name,
   });
 
@@ -558,17 +782,17 @@ async function renderFolderEditor(root, folderId) {
 
   async function save() {
     const name = nameInput.value.trim();
-    if (!name) { toast('Введите название папки'); nameInput.focus(); return; }
+    if (!name) { toast('Введите название хранилища'); nameInput.focus(); return; }
     if (folder.fields.length === 0) { toast('Добавьте хотя бы одно поле'); return; }
     folder.name = name;
     await DB.put('folders', folder);
-    toast(existing ? 'Папка обновлена' : 'Папка создана');
+    toast(existing ? 'Хранилище обновлено' : 'Хранилище создано');
     location.hash = `#/folder/${folder.id}`;
   }
 
   root.append(
     header({
-      title: existing ? 'Изменить папку' : 'Новая папка',
+      title: existing ? 'Изменить хранилище' : 'Новое хранилище',
       back: existing ? `#/folder/${folder.id}` : '#/',
     }),
     el('main', { class: 'content' },
@@ -582,7 +806,7 @@ async function renderFolderEditor(root, folderId) {
         )
       ),
       el('button', { type: 'button', class: 'btn btn-primary btn-block', onClick: save },
-        existing ? 'Сохранить изменения' : 'Создать папку'),
+        existing ? 'Сохранить изменения' : 'Создать хранилище'),
       existing
         ? el('div', { class: 'danger-zone' },
             el('button', {
@@ -591,19 +815,20 @@ async function renderFolderEditor(root, folderId) {
               onClick: async () => {
                 const count = (await DB.recordsByFolder(folder.id)).length;
                 const ok = await confirmModal({
-                  title: 'Удалить папку?',
-                  text: `Будут удалены папка и ${plural(count, 'запись', 'записи', 'записей')}. Действие нельзя отменить.`,
+                  title: 'Удалить хранилище?',
+                  text: `Будут удалены хранилище, все его папки и ${plural(count, 'запись', 'записи', 'записей')}. Действие нельзя отменить.`,
                   okText: 'Удалить',
                   danger: true,
                 });
                 if (ok) {
                   await DB.deleteRecordsByFolder(folder.id);
+                  await DB.deleteGroupsByFolder(folder.id);
                   await DB.del('folders', folder.id);
-                  toast('Папка удалена');
+                  toast('Хранилище удалено');
                   location.hash = '#/';
                 }
               },
-            }, 'Удалить папку')
+            }, 'Удалить хранилище')
           )
         : null
     )
@@ -624,7 +849,7 @@ async function renderSettings(root) {
   // --- Списки ---
   const listsSection = el('section', { class: 'card' },
     el('h2', {}, 'Списки вариантов'),
-    el('p', { class: 'muted' }, 'Общие списки для полей типа «Список» — например, местоположения. Один список можно использовать в разных папках.')
+    el('p', { class: 'muted' }, 'Общие списки для полей типа «Список» — например, местоположения. Один список можно использовать в разных хранилищах.')
   );
 
   lists.forEach((list) => {
@@ -666,7 +891,7 @@ async function renderSettings(root) {
       el('div', { class: 'list-card' },
         el('div', { class: 'list-head' },
           el('strong', {}, list.name),
-          el('span', { class: 'muted' }, usedCount ? `в ${usedCount} пап.` : 'не используется'),
+          el('span', { class: 'muted' }, usedCount ? `в ${usedCount} хранилищ.` : 'не используется'),
           el('button', {
             type: 'button', class: 'icon-btn', title: 'Переименовать',
             onClick: async () => {
@@ -769,7 +994,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.0.0. Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.1.0. Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(listsSection, backupSection, aboutSection);
@@ -789,8 +1014,10 @@ async function route() {
     if (parts[0] === 'settings') return await renderSettings(root);
     if (parts[0] === 'new-folder') return await renderFolderEditor(root, null);
     if (parts[0] === 'folder' && parts[1] && parts[2] === 'edit') return await renderFolderEditor(root, parts[1]);
-    if (parts[0] === 'folder' && parts[1]) return await renderFolder(root, parts[1]);
-    if (parts[0] === 'new-record' && parts[1]) return await renderRecord(root, null, parts[1]);
+    if (parts[0] === 'folder' && parts[1]) return await renderFolder(root, parts[1], parts.slice(2));
+    if (parts[0] === 'new-group' && parts[1]) return await renderGroupEditor(root, null, parts[1], parts.slice(2));
+    if (parts[0] === 'edit-group' && parts[1]) return await renderGroupEditor(root, parts[1]);
+    if (parts[0] === 'new-record' && parts[1]) return await renderRecord(root, null, parts[1], parts.slice(2));
     if (parts[0] === 'record' && parts[1]) return await renderRecord(root, parts[1]);
     location.hash = '#/';
   } catch (err) {
