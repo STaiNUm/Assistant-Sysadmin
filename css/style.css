@@ -723,22 +723,42 @@ textarea.input { resize: vertical; min-height: 80px; }
 
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
-/* ===== Тёмная тема (по настройке системы) ===== */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --primary: #3b82f6;
-    --primary-dark: #2563eb;
-    --danger: #ef4444;
-    --bg: #0f172a;
-    --surface: #1e293b;
-    --text: #e2e8f0;
-    --muted: #94a3b8;
-    --border: #334155;
-  }
+/* ===== Тёмная тема (переключается в настройках) ===== */
+:root[data-theme="dark"] {
+  --primary: #3b82f6;
+  --primary-dark: #2563eb;
+  --danger: #ef4444;
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --border: #334155;
+}
 
-  .toast { background: #334155; }
-  .notice { background: #3f3213; color: #fbbf24; }
-  .badge { background: #422006; color: #fbbf24; }
-  .badge-title { background: #172554; color: #93c5fd; }
-  .list-card { border-color: var(--border); }
+:root[data-theme="dark"] .toast { background: #334155; }
+:root[data-theme="dark"] .notice { background: #3f3213; color: #fbbf24; }
+:root[data-theme="dark"] .badge { background: #422006; color: #fbbf24; }
+:root[data-theme="dark"] .badge-title { background: #172554; color: #93c5fd; }
+:root[data-theme="dark"] .list-card { border-color: var(--border); }
+
+/* ===== Переключатель в настройках ===== */
+.segmented { display: flex; gap: 6px; }
+
+.segment {
+  flex: 1;
+  padding: 10px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.segment.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--primary);
 }

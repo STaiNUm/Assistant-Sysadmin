@@ -17,24 +17,35 @@ const FOLDER_COLORS = [
   '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899',
 ];
 
-const SORT_LABELS = {
-  title: 'По названию',
-  new: 'Сначала новые',
-  old: 'Сначала старые',
-};
-
 // ===== Мелкие помощники =====
 
 function vibrate(ms = 10) {
   try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
 }
 
-function getSortMode() {
-  try { return localStorage.getItem('sortMode') || 'title'; } catch (e) { return 'title'; }
+// ===== Тема оформления: system | light | dark =====
+
+function getThemePref() {
+  try { return localStorage.getItem('theme') || 'system'; } catch (e) { return 'system'; }
 }
 
-function setSortMode(value) {
-  try { localStorage.setItem('sortMode', value); } catch (e) {}
+function resolveDark(pref = getThemePref()) {
+  if (pref === 'dark') return true;
+  if (pref === 'light') return false;
+  return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
+
+function applyTheme(pref = getThemePref()) {
+  const dark = resolveDark(pref);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', dark ? '#0f172a' : '#2563eb');
+  return dark;
+}
+
+function setThemePref(pref) {
+  try { localStorage.setItem('theme', pref); } catch (e) {}
+  applyTheme(pref);
 }
 
 function getShowDone() {
@@ -463,7 +474,6 @@ async function renderFolder(root, folderId, groupPath = []) {
 
   let search = '';
   let filterValue = '';
-  let sortMode = getSortMode();
   const selectField = folder.fields.find((f) => f.type === 'select');
 
   root.append(
@@ -518,17 +528,6 @@ async function renderFolder(root, folderId, groupPath = []) {
     );
   }
 
-  // Сортировка записей
-  controls.append(
-    el('select', {
-      class: 'filter-select',
-      onChange: (e) => { sortMode = e.target.value; setSortMode(sortMode); renderList(); },
-    },
-      Object.entries(SORT_LABELS).map(([value, label]) =>
-        el('option', { value, selected: sortMode === value }, label))
-    )
-  );
-
   main.append(controls);
 
   const listEl = el('div', { class: 'record-list' });
@@ -545,16 +544,10 @@ async function renderFolder(root, folderId, groupPath = []) {
       if (q && !recordText(r).toLowerCase().includes(q)) return false;
       return true;
     });
-    if (sortMode === 'new') {
-      rows.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    } else if (sortMode === 'old') {
-      rows.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-    } else {
-      rows.sort((a, b) =>
-        String(a.values[titleField?.id] ?? '').localeCompare(
-          String(b.values[titleField?.id] ?? ''), 'ru', { numeric: true })
-      );
-    }
+    rows.sort((a, b) =>
+      String(a.values[titleField?.id] ?? '').localeCompare(
+        String(b.values[titleField?.id] ?? ''), 'ru', { numeric: true })
+    );
 
     listEl.innerHTML = '';
 
@@ -859,27 +852,6 @@ async function renderRecord(root, recordId, folderId, groupPath = []) {
         formParts
       ),
       el('button', { type: 'button', class: 'btn btn-primary btn-block', onClick: save }, 'Сохранить'),
-      record
-        ? el('button', {
-            type: 'button',
-            class: 'btn btn-block',
-            onClick: async () => {
-              const now = Date.now();
-              const copy = {
-                id: DB.uid(),
-                folderId: record.folderId,
-                groupId,
-                values: { ...record.values },
-                note: record.note || '',
-                createdAt: now,
-                updatedAt: now,
-              };
-              await DB.put('records', copy);
-              toast('Запись скопирована');
-              location.hash = `#/record/${copy.id}`;
-            },
-          }, 'Дублировать запись')
-        : null,
       record
         ? el('button', {
             type: 'button',
@@ -1253,6 +1225,24 @@ async function renderSettings(root) {
 
   const refresh = () => { root.innerHTML = ''; renderSettings(root); };
 
+  // --- Оформление ---
+  const themeButton = (value, label) =>
+    el('button', {
+      type: 'button',
+      class: 'segment' + (getThemePref() === value ? ' active' : ''),
+      onClick: () => { setThemePref(value); refresh(); },
+    }, label);
+
+  const themeSection = el('section', { class: 'card' },
+    el('h2', {}, 'Оформление'),
+    el('p', { class: 'muted' }, 'Тема приложения. «Как в системе» — подстраивается под настройку телефона.'),
+    el('div', { class: 'segmented' },
+      themeButton('system', 'Как в системе'),
+      themeButton('light', 'Светлая'),
+      themeButton('dark', 'Тёмная')
+    )
+  );
+
   // --- Списки ---
   const listsSection = el('section', { class: 'card' },
     el('h2', {}, 'Списки вариантов'),
@@ -1406,10 +1396,10 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.4.0 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.4.1 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
   );
 
-  main.append(listsSection, backupSection, aboutSection);
+  main.append(themeSection, listsSection, backupSection, aboutSection);
   root.append(main);
 }
 
@@ -1447,14 +1437,17 @@ async function route() {
 window.addEventListener('hashchange', route);
 route();
 
-// Цвет строки состояния под текущую тему (светлая/тёмная)
-(function applyThemeColor() {
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (!meta || !window.matchMedia) return;
-  const mq = window.matchMedia('(prefers-color-scheme: dark)');
-  const update = () => meta.setAttribute('content', mq.matches ? '#0f172a' : '#2563eb');
-  if (mq.addEventListener) mq.addEventListener('change', update);
-  update();
+// Тема: применяем сохранённую настройку и следим за системной
+(function initTheme() {
+  applyTheme();
+  if (window.matchMedia) {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) {
+      mq.addEventListener('change', () => {
+        if (getThemePref() === 'system') applyTheme('system');
+      });
+    }
+  }
 })();
 
 if ('serviceWorker' in navigator) {
