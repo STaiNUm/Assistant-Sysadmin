@@ -85,6 +85,16 @@ button { font-family: inherit; }
   padding: 16px 16px calc(96px + env(safe-area-inset-bottom));
   max-width: 640px;
   margin: 0 auto;
+  animation: screenIn 0.18s ease;
+}
+
+@keyframes screenIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content { animation: none; }
 }
 
 /* ===== FAB ===== */
@@ -137,8 +147,25 @@ button { font-family: inherit; }
 }
 
 .tab.active { color: var(--primary); }
+.tab-icon-wrap { position: relative; display: inline-flex; }
 .tab-icon { font-size: 20px; line-height: 1; }
 .tab.active .tab-label { font-weight: 600; }
+
+.tab-badge {
+  position: absolute;
+  top: -5px;
+  right: -11px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
 
 .content.tabbed { padding-bottom: calc(160px + env(safe-area-inset-bottom)); }
 
@@ -201,6 +228,62 @@ button { font-family: inherit; }
 }
 
 .task-row.done .task-text { color: var(--muted); text-decoration: line-through; }
+
+.section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.section-toggle-chevron { font-size: 10px; }
+.clear-done { margin-top: 10px; }
+
+/* ===== Напоминание ===== */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 12px;
+  padding: 10px 8px 10px 14px;
+  margin-bottom: 14px;
+  font-size: 14px;
+}
+
+.notice-text { flex: 1; }
+
+.notice-x {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+/* ===== Точка в результатах поиска ===== */
+.record-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+  flex: 0 0 auto;
+  margin: 0 6px;
+  background: var(--folder-color, var(--primary));
+}
 
 /* ===== Папки ===== */
 .folder-list { display: flex; flex-direction: column; gap: 10px; }
@@ -639,3 +722,23 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ===== Тёмная тема (по настройке системы) ===== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: #3b82f6;
+    --primary-dark: #2563eb;
+    --danger: #ef4444;
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --border: #334155;
+  }
+
+  .toast { background: #334155; }
+  .notice { background: #3f3213; color: #fbbf24; }
+  .badge { background: #422006; color: #fbbf24; }
+  .badge-title { background: #172554; color: #93c5fd; }
+  .list-card { border-color: var(--border); }
+}

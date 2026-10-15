@@ -9,6 +9,18 @@
   "lang": "ru",
   "background_color": "#f1f5f9",
   "theme_color": "#2563eb",
+  "shortcuts": [
+    {
+      "name": "Задачи",
+      "short_name": "Задачи",
+      "url": "./#/tasks"
+    },
+    {
+      "name": "Новое хранилище",
+      "short_name": "Хранилище",
+      "url": "./#/new-folder"
+    }
+  ],
   "icons": [
     {
       "src": "icons/icon-192.png",

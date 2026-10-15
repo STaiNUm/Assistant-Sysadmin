@@ -17,6 +17,34 @@ const FOLDER_COLORS = [
   '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899',
 ];
 
+const SORT_LABELS = {
+  title: 'По названию',
+  new: 'Сначала новые',
+  old: 'Сначала старые',
+};
+
+// ===== Мелкие помощники =====
+
+function vibrate(ms = 10) {
+  try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
+}
+
+function getSortMode() {
+  try { return localStorage.getItem('sortMode') || 'title'; } catch (e) { return 'title'; }
+}
+
+function setSortMode(value) {
+  try { localStorage.setItem('sortMode', value); } catch (e) {}
+}
+
+function getShowDone() {
+  try { return localStorage.getItem('tasksShowDone') === '1'; } catch (e) { return false; }
+}
+
+function setShowDone(value) {
+  try { localStorage.setItem('tasksShowDone', value ? '1' : '0'); } catch (e) {}
+}
+
 // ===== Общие компоненты =====
 
 function header({ title, color = null, back = null, actions = [] }) {
@@ -50,18 +78,34 @@ function fabAction(onClick, label, extra = '') {
 
 // Нижняя панель: необязательный блок ввода сверху + вкладки
 function bottombar(active, composer = null) {
-  const tab = (href, icon, label, key) =>
+  const tab = (href, icon, label, key, withBadge) =>
     el('a', { class: 'tab' + (active === key ? ' active' : ''), href },
-      el('span', { class: 'tab-icon' }, icon),
+      el('span', { class: 'tab-icon-wrap' },
+        el('span', { class: 'tab-icon' }, icon),
+        withBadge ? el('span', { class: 'tab-badge', style: 'display:none' }) : null
+      ),
       el('span', { class: 'tab-label' }, label)
     );
   return el('div', { class: 'bottombar' },
     composer,
     el('nav', { class: 'tabbar' },
-      tab('#/', '🗂️', 'Хранилища', 'storages'),
-      tab('#/tasks', '☑️', 'Задачи', 'tasks')
+      tab('#/', '🗂️', 'Хранилища', 'storages', false),
+      tab('#/tasks', '☑️', 'Задачи', 'tasks', true)
     )
   );
+}
+
+// Счётчик активных задач на вкладке «Задачи»
+async function updateTasksBadge(root) {
+  try {
+    const tasks = await DB.getAll('tasks');
+    const n = tasks.filter((t) => !t.done).length;
+    const badge = root.querySelector('.tab[href="#/tasks"] .tab-badge');
+    if (badge) {
+      badge.textContent = String(n);
+      badge.style.display = n ? '' : 'none';
+    }
+  } catch (e) {}
 }
 
 function getTitleField(folder) {
@@ -100,14 +144,15 @@ function summary(groupCount, recordCount) {
 // ===== Экран: главная (список хранилищ) =====
 
 async function renderHome(root) {
-  const [folders, records, groups] = await Promise.all([
-    DB.getAll('folders'), DB.getAll('records'), DB.getAll('groups'),
+  const [folders, records, groups, tasks] = await Promise.all([
+    DB.getAll('folders'), DB.getAll('records'), DB.getAll('groups'), DB.getAll('tasks'),
   ]);
   const counts = {};
   records.forEach((r) => { counts[r.folderId] = (counts[r.folderId] || 0) + 1; });
   const groupCounts = {};
   groups.forEach((g) => { groupCounts[g.folderId] = (groupCounts[g.folderId] || 0) + 1; });
   folders.sort((a, b) => a.createdAt - b.createdAt);
+  const byId = new Map(folders.map((f) => [f.id, f]));
 
   root.append(
     header({
@@ -118,34 +163,122 @@ async function renderHome(root) {
 
   const main = el('main', { class: 'content tabbed' });
 
-  if (folders.length === 0) {
-    main.append(
-      el('div', { class: 'empty' },
-        el('div', { class: 'empty-icon' }, '🗂️'),
-        el('p', {}, 'Хранилищ пока нет.'),
-        el('p', {}, 'Нажмите ＋, чтобы создать первое.')
-      )
+  // Напоминание о резервной копии
+  const lastExport = await DB.getMeta('lastExportAt');
+  let dismissedAt = 0;
+  try { dismissedAt = Number(localStorage.getItem('backupNoticeDismissedAt') || 0); } catch (e) {}
+  const WEEK = 7 * 24 * 60 * 60 * 1000;
+  const hasData = folders.length || records.length || tasks.length;
+  if (hasData && (!lastExport || Date.now() - lastExport > WEEK) && Date.now() - dismissedAt > WEEK) {
+    const notice = el('div', { class: 'notice' },
+      el('span', { class: 'notice-text' }, 'Давно не делали копию. Экспорт — в настройках.'),
+      el('button', {
+        type: 'button', class: 'notice-x', 'aria-label': 'Скрыть',
+        onClick: () => {
+          try { localStorage.setItem('backupNoticeDismissedAt', String(Date.now())); } catch (e) {}
+          notice.remove();
+        },
+      }, '✕')
     );
-  } else {
-    main.append(
-      el('div', { class: 'folder-list' },
-        folders.map((f) =>
-          el('a', {
-            class: 'folder-card',
-            href: `#/folder/${f.id}`,
-            style: `--folder-color:${f.color}`,
-          },
-            el('span', { class: 'folder-color' }),
-            el('span', { class: 'folder-name' }, f.name),
-            el('span', { class: 'folder-count' },
-              summary(groupCounts[f.id] || 0, counts[f.id] || 0))
+    main.append(notice);
+  }
+
+  // Поиск сразу по всем хранилищам
+  let query = '';
+  const searchInput = el('input', {
+    class: 'search-input',
+    type: 'search',
+    placeholder: 'Поиск по всем хранилищам…',
+    onInput: (e) => { query = e.target.value; renderBody(); },
+  });
+  main.append(el('div', { class: 'controls' }, searchInput));
+
+  const body = el('div');
+  main.append(body);
+
+  function renderBody() {
+    const q = query.trim().toLowerCase();
+    body.innerHTML = '';
+
+    if (!q) {
+      if (!folders.length) {
+        body.append(
+          el('div', { class: 'empty' },
+            el('div', { class: 'empty-icon' }, '🗂️'),
+            el('p', {}, 'Хранилищ пока нет.'),
+            el('p', {}, 'Нажмите ＋, чтобы создать первое.')
           )
-        )
+        );
+      } else {
+        body.append(
+          el('div', { class: 'folder-list' },
+            folders.map((f) =>
+              el('a', {
+                class: 'folder-card',
+                href: `#/folder/${f.id}`,
+                style: `--folder-color:${f.color}`,
+              },
+                el('span', { class: 'folder-color' }),
+                el('span', { class: 'folder-name' }, f.name),
+                el('span', { class: 'folder-count' },
+                  summary(groupCounts[f.id] || 0, counts[f.id] || 0))
+              )
+            )
+          )
+        );
+      }
+      return;
+    }
+
+    const found = [];
+    records.forEach((r) => {
+      const folder = byId.get(r.folderId);
+      if (!folder) return;
+      const text =
+        folder.fields.map((f) => String(r.values[f.id] ?? '')).join(' ') +
+        ' ' + (r.note || '');
+      if (!text.toLowerCase().includes(q)) return;
+      const titleField = getTitleField(folder);
+      found.push({
+        record: r,
+        folder,
+        title: String(r.values[titleField?.id] ?? '').trim() || 'Без названия',
+      });
+    });
+
+    if (!found.length) {
+      body.append(el('div', { class: 'empty' }, el('p', {}, 'Ничего не найдено.')));
+      return;
+    }
+
+    found.sort((a, b) => a.title.localeCompare(b.title, 'ru', { numeric: true }));
+    body.append(
+      el('div', { class: 'record-list' },
+        found.map(({ record, folder, title }) => {
+          const ids = record.groupId ? pathIdsFor(groups, record.groupId) : [];
+          const names = ids
+            .map((id) => (groups.find((g) => g.id === id) || {}).name)
+            .filter(Boolean);
+          return el('a', {
+            class: 'record-row',
+            href: `#/record/${record.id}`,
+            style: `--folder-color:${folder.color}`,
+          },
+            el('span', { class: 'record-dot' }),
+            el('span', { class: 'record-main' },
+              el('span', { class: 'record-title' }, title),
+              el('span', { class: 'record-sub' }, [folder.name, ...names].join(' / '))
+            ),
+            el('span', { class: 'record-chevron' }, '›')
+          );
+        })
       )
     );
   }
 
+  renderBody();
   root.append(main, fab('#/new-folder', 'Создать хранилище', 'fab-tabs'), bottombar('storages'));
+  updateTasksBadge(root);
 }
 
 // ===== Экран: задачи =====
@@ -193,6 +326,7 @@ async function renderTasks(root) {
             t.done = !t.done;
             t.completedAt = t.done ? Date.now() : null;
             await DB.put('tasks', t);
+            vibrate(10);
             refresh();
           },
         }, isDone ? '✓' : ''),
@@ -241,8 +375,45 @@ async function renderTasks(root) {
       listContainer.append(el('div', { class: 'section-title' }, 'Активные'), list(active, false));
     }
     if (done.length) {
-      listContainer.append(el('div', { class: 'section-title' }, 'Выполненные'), list(done, true));
+      const showDone = getShowDone();
+      listContainer.append(
+        el('button', {
+          type: 'button',
+          class: 'section-title section-toggle',
+          onClick: () => { setShowDone(!showDone); refresh(); },
+        },
+          `Выполненные (${done.length})`,
+          el('span', { class: 'section-toggle-chevron' }, showDone ? '▾' : '▸')
+        )
+      );
+      if (showDone) {
+        listContainer.append(
+          list(done, true),
+          el('button', {
+            type: 'button',
+            class: 'btn btn-small clear-done',
+            onClick: async () => {
+              const ok = await confirmModal({
+                title: 'Очистить выполненные?',
+                text: `Будет удалено ${plural(done.length, 'задача', 'задачи', 'задач')}.`,
+                okText: 'Очистить',
+                danger: true,
+              });
+              if (!ok) return;
+              const ids = new Set(done.map((t) => t.id));
+              for (const t of done) await DB.del('tasks', t.id);
+              for (let i = tasks.length - 1; i >= 0; i--) {
+                if (ids.has(tasks[i].id)) tasks.splice(i, 1);
+              }
+              toast('Выполненные очищены');
+              refresh();
+            },
+          }, 'Очистить выполненные')
+        );
+      }
     }
+
+    updateTasksBadge(root);
   }
 
   refresh();
@@ -283,6 +454,7 @@ async function renderFolder(root, folderId, groupPath = []) {
 
   let search = '';
   let filterValue = '';
+  let sortMode = getSortMode();
   const selectField = folder.fields.find((f) => f.type === 'select');
 
   root.append(
@@ -336,6 +508,18 @@ async function renderFolder(root, folderId, groupPath = []) {
       )
     );
   }
+
+  // Сортировка записей
+  controls.append(
+    el('select', {
+      class: 'filter-select',
+      onChange: (e) => { sortMode = e.target.value; setSortMode(sortMode); renderList(); },
+    },
+      Object.entries(SORT_LABELS).map(([value, label]) =>
+        el('option', { value, selected: sortMode === value }, label))
+    )
+  );
+
   main.append(controls);
 
   const listEl = el('div', { class: 'record-list' });
@@ -352,10 +536,16 @@ async function renderFolder(root, folderId, groupPath = []) {
       if (q && !recordText(r).toLowerCase().includes(q)) return false;
       return true;
     });
-    rows.sort((a, b) =>
-      String(a.values[titleField?.id] ?? '').localeCompare(
-        String(b.values[titleField?.id] ?? ''), 'ru', { numeric: true })
-    );
+    if (sortMode === 'new') {
+      rows.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    } else if (sortMode === 'old') {
+      rows.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    } else {
+      rows.sort((a, b) =>
+        String(a.values[titleField?.id] ?? '').localeCompare(
+          String(b.values[titleField?.id] ?? ''), 'ru', { numeric: true })
+      );
+    }
 
     listEl.innerHTML = '';
 
@@ -660,6 +850,27 @@ async function renderRecord(root, recordId, folderId, groupPath = []) {
         formParts
       ),
       el('button', { type: 'button', class: 'btn btn-primary btn-block', onClick: save }, 'Сохранить'),
+      record
+        ? el('button', {
+            type: 'button',
+            class: 'btn btn-block',
+            onClick: async () => {
+              const now = Date.now();
+              const copy = {
+                id: DB.uid(),
+                folderId: record.folderId,
+                groupId,
+                values: { ...record.values },
+                note: record.note || '',
+                createdAt: now,
+                updatedAt: now,
+              };
+              await DB.put('records', copy);
+              toast('Запись скопирована');
+              location.hash = `#/record/${copy.id}`;
+            },
+          }, 'Дублировать запись')
+        : null,
       record
         ? el('button', {
             type: 'button',
@@ -1024,7 +1235,9 @@ async function renderFolderEditor(root, folderId) {
 // ===== Экран: настройки =====
 
 async function renderSettings(root) {
-  const [lists, folders] = await Promise.all([DB.getAll('lists'), DB.getAll('folders')]);
+  const [lists, folders, lastExport] = await Promise.all([
+    DB.getAll('lists'), DB.getAll('folders'), DB.getMeta('lastExportAt'),
+  ]);
   lists.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 
   root.append(header({ title: 'Настройки', back: '#/' }));
@@ -1153,10 +1366,15 @@ async function renderSettings(root) {
   const backupSection = el('section', { class: 'card' },
     el('h2', {}, 'Резервные копии'),
     el('p', { class: 'muted' }, 'Все данные хранятся только на этом устройстве. Регулярно сохраняйте копию.'),
+    el('p', { class: 'muted' },
+      lastExport
+        ? `Последняя копия: ${new Date(lastExport).toLocaleDateString('ru-RU')}`
+        : 'Копия ещё не создавалась'),
     el('button', {
       type: 'button', class: 'btn btn-primary btn-block',
       onClick: async () => {
         const data = await DB.exportAll();
+        await DB.setMeta('lastExportAt', Date.now());
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = el('a', {
@@ -1180,7 +1398,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.3.2. Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.4.0 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(listsSection, backupSection, aboutSection);
@@ -1220,6 +1438,16 @@ async function route() {
 
 window.addEventListener('hashchange', route);
 route();
+
+// Цвет строки состояния под текущую тему (светлая/тёмная)
+(function applyThemeColor() {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta || !window.matchMedia) return;
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const update = () => meta.setAttribute('content', mq.matches ? '#0f172a' : '#2563eb');
+  if (mq.addEventListener) mq.addEventListener('change', update);
+  update();
+})();
 
 if ('serviceWorker' in navigator) {
   // Когда новый service worker берёт управление, перезагружаем страницу,

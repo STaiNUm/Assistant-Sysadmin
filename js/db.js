@@ -1,7 +1,7 @@
 // ===== Слой данных: IndexedDB =====
 
 const DB_NAME = 'info-storage';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbPromise = null;
 
@@ -28,6 +28,9 @@ function open() {
         }
         if (!db.objectStoreNames.contains('tasks')) {
           db.createObjectStore('tasks', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('meta')) {
+          db.createObjectStore('meta', { keyPath: 'key' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -76,6 +79,17 @@ export async function recordsByFolder(folderId) {
   return wrap(store.index('folderId').getAll(folderId));
 }
 
+// ===== Небольшие настройки (key → value) =====
+
+export async function getMeta(key) {
+  const rec = await get('meta', key);
+  return rec ? rec.value : null;
+}
+
+export async function setMeta(key, value) {
+  return put('meta', { key, value });
+}
+
 export async function deleteRecordsByFolder(folderId) {
   const records = await recordsByFolder(folderId);
   const store = await getStore('records', 'readwrite');
@@ -118,18 +132,19 @@ export async function deleteGroupDeep(groupId) {
 export async function exportAll() {
   return {
     app: 'info-storage',
-    version: 3,
+    version: 4,
     exportedAt: new Date().toISOString(),
     folders: await getAll('folders'),
     groups: await getAll('groups'),
     records: await getAll('records'),
     lists: await getAll('lists'),
     tasks: await getAll('tasks'),
+    meta: await getAll('meta'),
   };
 }
 
 export async function importAll(data) {
-  for (const name of ['folders', 'groups', 'records', 'lists', 'tasks']) {
+  for (const name of ['folders', 'groups', 'records', 'lists', 'tasks', 'meta']) {
     await wrap((await getStore(name, 'readwrite')).clear());
   }
   for (const folder of data.folders) await put('folders', folder);
@@ -137,4 +152,5 @@ export async function importAll(data) {
   for (const record of data.records) await put('records', record);
   for (const list of data.lists) await put('lists', list);
   for (const task of data.tasks || []) await put('tasks', task);
+  for (const item of data.meta || []) await put('meta', item);
 }
