@@ -45,6 +45,15 @@ function setShowDone(value) {
   try { localStorage.setItem('tasksShowDone', value ? '1' : '0'); } catch (e) {}
 }
 
+// Дата последнего экспорта — в localStorage, чтобы база оставалась совместимой с основной версией
+function getLastExport() {
+  try { return Number(localStorage.getItem('lastExportAt') || 0) || null; } catch (e) { return null; }
+}
+
+function setLastExport(ts) {
+  try { localStorage.setItem('lastExportAt', String(ts)); } catch (e) {}
+}
+
 // ===== Общие компоненты =====
 
 function header({ title, color = null, back = null, actions = [] }) {
@@ -164,7 +173,7 @@ async function renderHome(root) {
   const main = el('main', { class: 'content tabbed' });
 
   // Напоминание о резервной копии
-  const lastExport = await DB.getMeta('lastExportAt');
+  const lastExport = getLastExport();
   let dismissedAt = 0;
   try { dismissedAt = Number(localStorage.getItem('backupNoticeDismissedAt') || 0); } catch (e) {}
   const WEEK = 7 * 24 * 60 * 60 * 1000;
@@ -1235,9 +1244,8 @@ async function renderFolderEditor(root, folderId) {
 // ===== Экран: настройки =====
 
 async function renderSettings(root) {
-  const [lists, folders, lastExport] = await Promise.all([
-    DB.getAll('lists'), DB.getAll('folders'), DB.getMeta('lastExportAt'),
-  ]);
+  const [lists, folders] = await Promise.all([DB.getAll('lists'), DB.getAll('folders')]);
+  const lastExport = getLastExport();
   lists.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 
   root.append(header({ title: 'Настройки', back: '#/' }));
@@ -1374,7 +1382,7 @@ async function renderSettings(root) {
       type: 'button', class: 'btn btn-primary btn-block',
       onClick: async () => {
         const data = await DB.exportAll();
-        await DB.setMeta('lastExportAt', Date.now());
+        setLastExport(Date.now());
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = el('a', {
