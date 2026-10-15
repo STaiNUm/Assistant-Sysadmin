@@ -1,5 +1,5 @@
 // Service Worker: офлайн-кэш приложения «Хранилище»
-const VERSION = '1.3.1';
+const VERSION = '1.3.2';
 const CACHE = 'info-storage-' + VERSION;
 
 const ASSETS = [
@@ -17,7 +17,15 @@ const ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE).then((cache) =>
+      // cache: 'reload' — скачиваем файлы в обход HTTP-кэша,
+      // иначе после обновления сайта в кэш могли попасть старые версии.
+      Promise.all(
+        ASSETS.map((url) =>
+          fetch(new Request(url, { cache: 'reload' })).then((res) => cache.put(url, res))
+        )
+      )
+    )
   );
   self.skipWaiting();
 });

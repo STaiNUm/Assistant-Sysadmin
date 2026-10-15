@@ -1180,7 +1180,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.3.1. Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.3.2. Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(listsSection, backupSection, aboutSection);
@@ -1222,7 +1222,18 @@ window.addEventListener('hashchange', route);
 route();
 
 if ('serviceWorker' in navigator) {
+  // Когда новый service worker берёт управление, перезагружаем страницу,
+  // чтобы сразу показать свежую версию приложения.
+  let refreshed = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshed) return;
+    refreshed = true;
+    window.location.reload();
+  });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('SW:', err));
+    navigator.serviceWorker
+      .register('./sw.js')
+      .then((reg) => reg.update())
+      .catch((err) => console.warn('SW:', err));
   });
 }
