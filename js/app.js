@@ -48,16 +48,19 @@ function fabAction(onClick, label, extra = '') {
   return el('button', { class: 'fab' + (extra ? ' ' + extra : ''), type: 'button', 'aria-label': label, title: label, onClick }, '＋');
 }
 
-// Нижняя панель вкладок
-function tabbar(active) {
+// Нижняя панель: необязательный блок ввода сверху + вкладки
+function bottombar(active, composer = null) {
   const tab = (href, icon, label, key) =>
     el('a', { class: 'tab' + (active === key ? ' active' : ''), href },
       el('span', { class: 'tab-icon' }, icon),
       el('span', { class: 'tab-label' }, label)
     );
-  return el('nav', { class: 'tabbar' },
-    tab('#/', '🗂️', 'Хранилища', 'storages'),
-    tab('#/tasks', '☑️', 'Задачи', 'tasks')
+  return el('div', { class: 'bottombar' },
+    composer,
+    el('nav', { class: 'tabbar' },
+      tab('#/', '🗂️', 'Хранилища', 'storages'),
+      tab('#/tasks', '☑️', 'Задачи', 'tasks')
+    )
   );
 }
 
@@ -142,101 +145,108 @@ async function renderHome(root) {
     );
   }
 
-  root.append(main, fab('#/new-folder', 'Создать хранилище', 'fab-tabs'), tabbar('storages'));
+  root.append(main, fab('#/new-folder', 'Создать хранилище', 'fab-tabs'), bottombar('storages'));
 }
 
 // ===== Экран: задачи =====
 
 async function renderTasks(root) {
   const tasks = await DB.getAll('tasks');
-  tasks.sort((a, b) => b.createdAt - a.createdAt);
-  const active = tasks.filter((t) => !t.done);
-  const done = tasks
-    .filter((t) => t.done)
-    .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
 
   root.append(header({ title: 'Задачи' }));
 
   const main = el('main', { class: 'content tabbed' });
+  const listContainer = el('div');
+  main.append(listContainer);
 
-  const rerender = () => { root.innerHTML = ''; renderTasks(root); };
-
-  // Быстрое добавление
+  // Поле ввода — внизу, над вкладками (удобно дотягиваться большим пальцем)
   const input = el('input', { class: 'input', type: 'text', placeholder: 'Новая задача…' });
   const add = async () => {
     const text = input.value.trim();
     if (!text) return;
-    await DB.put('tasks', { id: DB.uid(), text, done: false, createdAt: Date.now(), completedAt: null });
+    const task = { id: DB.uid(), text, done: false, createdAt: Date.now(), completedAt: null };
+    await DB.put('tasks', task);
+    tasks.push(task);
     input.value = '';
-    rerender();
+    input.focus();
+    refresh();
   };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
-  main.append(
-    el('div', { class: 'task-add' },
-      input,
-      el('button', { type: 'button', class: 'btn btn-primary', onClick: add, 'aria-label': 'Добавить задачу' }, '＋')
-    )
+  const composer = el('div', { class: 'task-composer' },
+    input,
+    el('button', { type: 'button', class: 'btn btn-primary', onClick: add, 'aria-label': 'Добавить задачу' }, '＋')
   );
 
-  if (tasks.length) {
-    main.append(el('p', { class: 'muted task-summary' }, `Выполнено ${done.length} из ${tasks.length}`));
-  }
+  function refresh() {
+    const active = tasks.filter((t) => !t.done).sort((a, b) => b.createdAt - a.createdAt);
+    const done = tasks
+      .filter((t) => t.done)
+      .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
 
-  const renderList = (arr, isDone) =>
-    el('div', { class: 'task-list' },
-      arr.map((t) =>
-        el('div', { class: 'task-row' + (isDone ? ' done' : '') },
-          el('button', {
-            type: 'button',
-            class: 'task-check' + (isDone ? ' checked' : ''),
-            'aria-label': isDone ? 'Снять отметку' : 'Отметить выполненной',
-            onClick: async () => {
-              t.done = !t.done;
-              t.completedAt = t.done ? Date.now() : null;
-              await DB.put('tasks', t);
-              rerender();
-            },
-          }, isDone ? '✓' : ''),
-          el('button', {
-            type: 'button',
-            class: 'task-text',
-            onClick: async () => {
-              const nv = await promptModal({ title: 'Изменить задачу', value: t.text });
-              if (nv) { t.text = nv; await DB.put('tasks', t); rerender(); }
-            },
-          }, t.text),
-          el('button', {
-            type: 'button',
-            class: 'icon-btn danger',
-            'aria-label': 'Удалить задачу',
-            onClick: async () => {
-              await DB.del('tasks', t.id);
-              toast('Задача удалена');
-              rerender();
-            },
-          }, '✕')
+    const makeRow = (t, isDone) =>
+      el('div', { class: 'task-row' + (isDone ? ' done' : '') },
+        el('button', {
+          type: 'button',
+          class: 'task-check' + (isDone ? ' checked' : ''),
+          'aria-label': isDone ? 'Снять отметку' : 'Отметить выполненной',
+          onClick: async () => {
+            t.done = !t.done;
+            t.completedAt = t.done ? Date.now() : null;
+            await DB.put('tasks', t);
+            refresh();
+          },
+        }, isDone ? '✓' : ''),
+        el('button', {
+          type: 'button',
+          class: 'task-text',
+          onClick: async () => {
+            const nv = await promptModal({ title: 'Изменить задачу', value: t.text });
+            if (nv) { t.text = nv; await DB.put('tasks', t); refresh(); }
+          },
+        }, t.text),
+        el('button', {
+          type: 'button',
+          class: 'icon-btn danger',
+          'aria-label': 'Удалить задачу',
+          onClick: async () => {
+            await DB.del('tasks', t.id);
+            const i = tasks.findIndex((x) => x.id === t.id);
+            if (i >= 0) tasks.splice(i, 1);
+            toast('Задача удалена');
+            refresh();
+          },
+        }, '✕')
+      );
+
+    const list = (arr, isDone) =>
+      el('div', { class: 'task-list' }, arr.map((t) => makeRow(t, isDone)));
+
+    listContainer.innerHTML = '';
+
+    if (!tasks.length) {
+      listContainer.append(
+        el('div', { class: 'empty' },
+          el('div', { class: 'empty-icon' }, '☑️'),
+          el('p', {}, 'Задач пока нет.'),
+          el('p', {}, 'Впишите первую в поле снизу и нажмите ＋.')
         )
-      )
-    );
+      );
+      return;
+    }
 
-  if (!tasks.length) {
-    main.append(
-      el('div', { class: 'empty' },
-        el('div', { class: 'empty-icon' }, '☑️'),
-        el('p', {}, 'Задач пока нет.'),
-        el('p', {}, 'Впишите первую в поле выше и нажмите ＋.')
-      )
+    listContainer.append(
+      el('p', { class: 'muted task-summary' }, `Выполнено ${done.length} из ${tasks.length}`)
     );
-  } else {
     if (active.length) {
-      main.append(el('div', { class: 'section-title' }, 'Активные'), renderList(active, false));
+      listContainer.append(el('div', { class: 'section-title' }, 'Активные'), list(active, false));
     }
     if (done.length) {
-      main.append(el('div', { class: 'section-title' }, 'Выполненные'), renderList(done, true));
+      listContainer.append(el('div', { class: 'section-title' }, 'Выполненные'), list(done, true));
     }
   }
 
-  root.append(main, tabbar('tasks'));
+  refresh();
+  root.append(main, bottombar('tasks', composer));
 }
 
 // ===== Экран: хранилище или папка (список папок и записей) =====
@@ -1170,7 +1180,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.3.0. Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.3.1. Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(listsSection, backupSection, aboutSection);

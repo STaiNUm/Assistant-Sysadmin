@@ -111,18 +111,19 @@ button { font-family: inherit; }
 .fab:active { background: var(--primary-dark); }
 .fab.fab-tabs { bottom: calc(78px + env(safe-area-inset-bottom)); }
 
-/* ===== Нижняя панель вкладок ===== */
-.tabbar {
+/* ===== Нижняя панель (поле ввода + вкладки) ===== */
+.bottombar {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 40;
-  display: flex;
   background: var(--surface);
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom);
 }
+
+.tabbar { display: flex; }
 
 .tab {
   flex: 1;
@@ -142,9 +143,17 @@ button { font-family: inherit; }
 .content.tabbed { padding-bottom: calc(160px + env(safe-area-inset-bottom)); }
 
 /* ===== Задачи ===== */
-.task-add { display: flex; gap: 8px; margin-bottom: 14px; }
-.task-add .input { flex: 1; }
-.task-add .btn { flex: 0 0 auto; padding: 0 18px; font-size: 22px; }
+.task-composer {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  max-width: 640px;
+  margin: 0 auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.task-composer .input { flex: 1; }
+.task-composer .btn { flex: 0 0 auto; padding: 0 18px; font-size: 22px; }
 
 .task-summary { margin-bottom: 8px; }
 
