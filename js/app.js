@@ -40,12 +40,25 @@ function header({ title, color = null, back = null, actions = [] }) {
   );
 }
 
-function fab(href, label) {
-  return el('a', { class: 'fab', href, 'aria-label': label, title: label }, '＋');
+function fab(href, label, extra = '') {
+  return el('a', { class: 'fab' + (extra ? ' ' + extra : ''), href, 'aria-label': label, title: label }, '＋');
 }
 
-function fabAction(onClick, label) {
-  return el('button', { class: 'fab', type: 'button', 'aria-label': label, title: label, onClick }, '＋');
+function fabAction(onClick, label, extra = '') {
+  return el('button', { class: 'fab' + (extra ? ' ' + extra : ''), type: 'button', 'aria-label': label, title: label, onClick }, '＋');
+}
+
+// Нижняя панель вкладок
+function tabbar(active) {
+  const tab = (href, icon, label, key) =>
+    el('a', { class: 'tab' + (active === key ? ' active' : ''), href },
+      el('span', { class: 'tab-icon' }, icon),
+      el('span', { class: 'tab-label' }, label)
+    );
+  return el('nav', { class: 'tabbar' },
+    tab('#/', '🗂️', 'Хранилища', 'storages'),
+    tab('#/tasks', '☑️', 'Задачи', 'tasks')
+  );
 }
 
 function getTitleField(folder) {
@@ -100,7 +113,7 @@ async function renderHome(root) {
     })
   );
 
-  const main = el('main', { class: 'content' });
+  const main = el('main', { class: 'content tabbed' });
 
   if (folders.length === 0) {
     main.append(
@@ -129,7 +142,101 @@ async function renderHome(root) {
     );
   }
 
-  root.append(main, fab('#/new-folder', 'Создать хранилище'));
+  root.append(main, fab('#/new-folder', 'Создать хранилище', 'fab-tabs'), tabbar('storages'));
+}
+
+// ===== Экран: задачи =====
+
+async function renderTasks(root) {
+  const tasks = await DB.getAll('tasks');
+  tasks.sort((a, b) => b.createdAt - a.createdAt);
+  const active = tasks.filter((t) => !t.done);
+  const done = tasks
+    .filter((t) => t.done)
+    .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+
+  root.append(header({ title: 'Задачи' }));
+
+  const main = el('main', { class: 'content tabbed' });
+
+  const rerender = () => { root.innerHTML = ''; renderTasks(root); };
+
+  // Быстрое добавление
+  const input = el('input', { class: 'input', type: 'text', placeholder: 'Новая задача…' });
+  const add = async () => {
+    const text = input.value.trim();
+    if (!text) return;
+    await DB.put('tasks', { id: DB.uid(), text, done: false, createdAt: Date.now(), completedAt: null });
+    input.value = '';
+    rerender();
+  };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+  main.append(
+    el('div', { class: 'task-add' },
+      input,
+      el('button', { type: 'button', class: 'btn btn-primary', onClick: add, 'aria-label': 'Добавить задачу' }, '＋')
+    )
+  );
+
+  if (tasks.length) {
+    main.append(el('p', { class: 'muted task-summary' }, `Выполнено ${done.length} из ${tasks.length}`));
+  }
+
+  const renderList = (arr, isDone) =>
+    el('div', { class: 'task-list' },
+      arr.map((t) =>
+        el('div', { class: 'task-row' + (isDone ? ' done' : '') },
+          el('button', {
+            type: 'button',
+            class: 'task-check' + (isDone ? ' checked' : ''),
+            'aria-label': isDone ? 'Снять отметку' : 'Отметить выполненной',
+            onClick: async () => {
+              t.done = !t.done;
+              t.completedAt = t.done ? Date.now() : null;
+              await DB.put('tasks', t);
+              rerender();
+            },
+          }, isDone ? '✓' : ''),
+          el('button', {
+            type: 'button',
+            class: 'task-text',
+            onClick: async () => {
+              const nv = await promptModal({ title: 'Изменить задачу', value: t.text });
+              if (nv) { t.text = nv; await DB.put('tasks', t); rerender(); }
+            },
+          }, t.text),
+          el('button', {
+            type: 'button',
+            class: 'icon-btn danger',
+            'aria-label': 'Удалить задачу',
+            onClick: async () => {
+              await DB.del('tasks', t.id);
+              toast('Задача удалена');
+              rerender();
+            },
+          }, '✕')
+        )
+      )
+    );
+
+  if (!tasks.length) {
+    main.append(
+      el('div', { class: 'empty' },
+        el('div', { class: 'empty-icon' }, '☑️'),
+        el('p', {}, 'Задач пока нет.'),
+        el('p', {}, 'Впишите первую в поле выше и нажмите ＋.')
+      )
+    );
+  } else {
+    if (active.length) {
+      main.append(el('div', { class: 'section-title' }, 'Активные'), renderList(active, false));
+    }
+    if (done.length) {
+      main.append(el('div', { class: 'section-title' }, 'Выполненные'), renderList(done, true));
+    }
+  }
+
+  root.append(main, tabbar('tasks'));
 }
 
 // ===== Экран: хранилище или папка (список папок и записей) =====
@@ -1063,7 +1170,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.2.1. Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.3.0. Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(listsSection, backupSection, aboutSection);
@@ -1080,6 +1187,7 @@ async function route() {
 
   try {
     if (parts.length === 0) return await renderHome(root);
+    if (parts[0] === 'tasks') return await renderTasks(root);
     if (parts[0] === 'settings') return await renderSettings(root);
     if (parts[0] === 'new-folder') return await renderFolderEditor(root, null);
     if (parts[0] === 'folder' && parts[1] && parts[2] === 'edit') return await renderFolderEditor(root, parts[1]);

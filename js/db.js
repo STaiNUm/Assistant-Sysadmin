@@ -1,7 +1,7 @@
 // ===== Слой данных: IndexedDB =====
 
 const DB_NAME = 'info-storage';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise = null;
 
@@ -25,6 +25,9 @@ function open() {
         }
         if (!db.objectStoreNames.contains('lists')) {
           db.createObjectStore('lists', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('tasks')) {
+          db.createObjectStore('tasks', { keyPath: 'id' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -115,21 +118,23 @@ export async function deleteGroupDeep(groupId) {
 export async function exportAll() {
   return {
     app: 'info-storage',
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     folders: await getAll('folders'),
     groups: await getAll('groups'),
     records: await getAll('records'),
     lists: await getAll('lists'),
+    tasks: await getAll('tasks'),
   };
 }
 
 export async function importAll(data) {
-  for (const name of ['folders', 'groups', 'records', 'lists']) {
+  for (const name of ['folders', 'groups', 'records', 'lists', 'tasks']) {
     await wrap((await getStore(name, 'readwrite')).clear());
   }
   for (const folder of data.folders) await put('folders', folder);
   for (const group of data.groups || []) await put('groups', group);
   for (const record of data.records) await put('records', record);
   for (const list of data.lists) await put('lists', list);
+  for (const task of data.tasks || []) await put('tasks', task);
 }

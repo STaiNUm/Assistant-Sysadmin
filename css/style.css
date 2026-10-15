@@ -109,6 +109,89 @@ button { font-family: inherit; }
 }
 
 .fab:active { background: var(--primary-dark); }
+.fab.fab-tabs { bottom: calc(78px + env(safe-area-inset-bottom)); }
+
+/* ===== Нижняя панель вкладок ===== */
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tab.active { color: var(--primary); }
+.tab-icon { font-size: 20px; line-height: 1; }
+.tab.active .tab-label { font-weight: 600; }
+
+.content.tabbed { padding-bottom: calc(160px + env(safe-area-inset-bottom)); }
+
+/* ===== Задачи ===== */
+.task-add { display: flex; gap: 8px; margin-bottom: 14px; }
+.task-add .input { flex: 1; }
+.task-add .btn { flex: 0 0 auto; padding: 0 18px; font-size: 22px; }
+
+.task-summary { margin-bottom: 8px; }
+
+.task-list { display: flex; flex-direction: column; gap: 8px; }
+
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 10px 8px 10px 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.task-check {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.task-check.checked { background: var(--primary); border-color: var(--primary); }
+
+.task-text {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  word-break: break-word;
+}
+
+.task-row.done .task-text { color: var(--muted); text-decoration: line-through; }
 
 /* ===== Папки ===== */
 .folder-list { display: flex; flex-direction: column; gap: 10px; }
