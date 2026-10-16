@@ -48,6 +48,54 @@ function setThemePref(pref) {
   applyTheme(pref);
 }
 
+// Значение поля для показа в списке (пустые и «нет» не показываем)
+function displayValue(field, value) {
+  if (field.type === 'checkbox') return value ? 'Да' : '';
+  if (value === null || value === undefined || value === '') return '';
+  if (field.type === 'date') {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? String(value) : d.toLocaleDateString('ru-RU');
+  }
+  return String(value);
+}
+
+// Удержание: onTap — короткое нажатие, onLongPress — удержание ~0.5 c
+function attachPress(node, { onTap, onLongPress }) {
+  let timer = null;
+  let longFired = false;
+
+  const start = (e) => {
+    if (e.target.closest && e.target.closest('button')) return;
+    longFired = false;
+    timer = setTimeout(() => {
+      timer = null;
+      longFired = true;
+      onLongPress();
+    }, 500);
+  };
+  const cancel = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+  };
+
+  node.addEventListener('pointerdown', start);
+  node.addEventListener('pointerup', cancel);
+  node.addEventListener('pointerleave', cancel);
+  node.addEventListener('pointercancel', cancel);
+  node.addEventListener('contextmenu', (e) => e.preventDefault());
+  node.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (!longFired) onTap();
+  });
+}
+
+function hintShown() {
+  try { return localStorage.getItem('longPressHint') === '1'; } catch (e) { return true; }
+}
+
+function markHintShown() {
+  try { localStorage.setItem('longPressHint', '1'); } catch (e) {}
+}
+
 function getShowDone() {
   try { return localStorage.getItem('tasksShowDone') === '1'; } catch (e) { return false; }
 }
@@ -533,6 +581,9 @@ async function renderFolder(root, folderId, groupPath = []) {
   const listEl = el('div', { class: 'record-list' });
   main.append(listEl);
 
+  // Свёрнутые вручную записи (по умолчанию все раскрыты)
+  const collapsed = new Set();
+
   const titleField = getTitleField(folder);
   const recordText = (r) =>
     folder.fields.map((f) => String(r.values[f.id] ?? '')).join(' ') + ' ' + (r.note || '');
@@ -579,21 +630,55 @@ async function renderFolder(root, folderId, groupPath = []) {
       if (childGroups.length) listEl.append(el('div', { class: 'section-title' }, 'Записи'));
       rows.forEach((r, i) => {
         const title = String(r.values[titleField?.id] ?? '').trim() || 'Без названия';
-        const loc = selectField ? String(r.values[selectField.id] ?? '') : '';
-        listEl.append(
-          el('a', {
-            class: 'record-row',
-            href: `#/record/${r.id}`,
-            style: `--folder-color:${folder.color}`,
-          },
+        const details = folder.fields
+          .filter((f) => f.id !== titleField?.id)
+          .map((f) => ({ name: f.name, value: displayValue(f, r.values[f.id]) }))
+          .filter((d) => d.value);
+        const isCollapsed = collapsed.has(r.id);
+
+        const card = el('div', {
+          class: 'record-card' + (isCollapsed ? ' collapsed' : ''),
+          style: `--folder-color:${folder.color}`,
+        },
+          el('div', { class: 'record-head' },
             el('span', { class: 'record-num' }, String(i + 1)),
             el('span', { class: 'record-main' },
-              el('span', { class: 'record-title' }, title),
-              loc ? el('span', { class: 'record-sub' }, loc) : null
+              el('span', { class: 'record-title' }, title)
             ),
-            el('span', { class: 'record-chevron' }, '›')
-          )
+            el('button', {
+              type: 'button',
+              class: 'icon-btn',
+              title: 'Изменить',
+              'aria-label': 'Изменить запись',
+              onClick: (e) => { e.stopPropagation(); location.hash = `#/record/${r.id}`; },
+            }, '✎')
+          ),
+          !isCollapsed && details.length
+            ? el('div', { class: 'record-details' },
+                details.map((d) =>
+                  el('div', { class: 'record-detail' },
+                    el('span', { class: 'record-detail-label' }, d.name),
+                    el('span', { class: 'record-detail-value' }, d.value)
+                  )
+                )
+              )
+            : null,
+          !isCollapsed && r.note
+            ? el('div', { class: 'record-note' }, r.note)
+            : null
         );
+
+        // Короткий тап — свернуть/развернуть, удержание — редактирование
+        attachPress(card, {
+          onTap: () => {
+            if (collapsed.has(r.id)) collapsed.delete(r.id);
+            else collapsed.add(r.id);
+            renderList();
+          },
+          onLongPress: () => { vibrate(15); location.hash = `#/record/${r.id}`; },
+        });
+
+        listEl.append(card);
       });
     }
 
@@ -610,6 +695,10 @@ async function renderFolder(root, folderId, groupPath = []) {
   }
 
   renderList();
+  if (records.length && !hintShown()) {
+    markHintShown();
+    setTimeout(() => toast('Удерживайте запись, чтобы изменить'), 500);
+  }
   root.append(main, fabAction(() => openCreateMenu(folderId, pathIds), 'Создать'));
 }
 
@@ -1396,7 +1485,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.4.1 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.4.2 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(themeSection, listsSection, backupSection, aboutSection);

@@ -362,6 +362,48 @@ button { font-family: inherit; }
 .record-sub { color: var(--muted); font-size: 13px; }
 .record-chevron { color: var(--border); font-size: 22px; }
 
+/* ===== Раскрытая карточка записи ===== */
+.record-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 10px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.record-card:active { transform: scale(0.995); }
+
+.record-head { display: flex; align-items: center; gap: 12px; }
+
+.record-details {
+  margin: 8px 4px 2px 50px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.record-detail { display: flex; gap: 8px; font-size: 14px; }
+
+.record-detail-label {
+  color: var(--muted);
+  flex: 0 0 auto;
+  min-width: 90px;
+  max-width: 40%;
+}
+
+.record-detail-value { flex: 1; min-width: 0; word-break: break-word; }
+
+.record-note {
+  margin: 8px 4px 2px 50px;
+  font-size: 14px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ===== Папки внутри хранилища (визуально отличаются от записей) ===== */
 .section-title {
   font-size: 12px;
