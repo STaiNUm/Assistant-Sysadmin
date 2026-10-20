@@ -133,6 +133,68 @@ function formatRemind(ts) {
   return `${day}, ${timeInputValue(d)}`;
 }
 
+// ===== Экспорт напоминания в календарь (.ics) =====
+
+function icsEscape(text) {
+  return String(text)
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
+}
+
+function icsDate(ts) {
+  return new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+}
+
+function buildIcs(ts, text) {
+  const end = ts + 30 * 60 * 1000;
+  const uid = 'reminder-' + ts + '@info-storage';
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Info Storage//RU',
+    'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT',
+    'UID:' + uid,
+    'DTSTAMP:' + icsDate(Date.now()),
+    'DTSTART:' + icsDate(ts),
+    'DTEND:' + icsDate(end),
+    'SUMMARY:' + icsEscape(text),
+    'BEGIN:VALARM',
+    'TRIGGER:-PT0M',
+    'ACTION:DISPLAY',
+    'DESCRIPTION:' + icsEscape(text),
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+}
+
+async function exportToCalendar(ts, text) {
+  const content = buildIcs(ts, text);
+  const file = new File([content], 'reminder.ics', { type: 'text/calendar' });
+
+  // На Android удобнее «поделиться» прямо в календарь
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: text });
+      return true;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return false;
+    }
+  }
+
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/calendar' }));
+  const a = el('a', { href: url, download: 'reminder.ics' });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast('Файл события сохранён — откройте его в календаре');
+  return true;
+}
+
 async function ensureNotifyPermission() {
   try {
     if (!('Notification' in window)) return false;
@@ -226,6 +288,20 @@ function reminderModal(task) {
           preset('Сегодня 18:00', today18),
           preset('Завтра 09:00', tomorrow9)
         ),
+        el('button', {
+          type: 'button',
+          class: 'btn btn-block',
+          onClick: async () => {
+            const d = dateInput.value;
+            const t = timeInput.value;
+            if (!d || !t) { toast('Укажите дату и время'); return; }
+            const ts = new Date(`${d}T${t}`).getTime();
+            if (!ts || isNaN(ts)) { toast('Некорректная дата'); return; }
+            await exportToCalendar(ts, task.text);
+          },
+        }, '📅 Добавить в календарь'),
+        el('p', { class: 'muted' },
+          'Событие с будильником: телефон напомнит даже при закрытом приложении и без интернета.'),
       ],
       actions,
       onCancel: () => resolve(null),
@@ -1675,7 +1751,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.5.1 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.5.2 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(themeSection, listsSection, backupSection, aboutSection);
