@@ -229,6 +229,24 @@ button { font-family: inherit; }
 
 .task-row.done .task-text { color: var(--muted); text-decoration: line-through; }
 
+.task-remind {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.task-remind.set { color: var(--primary); font-weight: 600; }
+.task-remind.overdue { color: var(--danger); font-weight: 600; }
+
+.presets { display: flex; gap: 6px; flex-wrap: wrap; }
+
 .section-toggle {
   display: flex;
   align-items: center;
