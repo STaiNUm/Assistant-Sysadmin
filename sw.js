@@ -1,5 +1,5 @@
 // Service Worker: офлайн-кэш приложения «Хранилище»
-const VERSION = '1.5.2';
+const VERSION = '1.5.3';
 const CACHE = 'info-storage-' + VERSION;
 
 const ASSETS = [
@@ -76,7 +76,10 @@ async function notifyDueTasks() {
       req.onerror = () => reject(req.error);
     });
     const now = Date.now();
-    const due = tasks.filter((t) => t.remindAt && !t.done && !t.remindFired && t.remindAt <= now);
+    const ahead = 10 * 60 * 1000;
+    const due = tasks.filter(
+      (t) => t.remindAt && !t.done && !t.remindFired && t.remindAt - ahead <= now
+    );
     for (const t of due) {
       await self.registration.showNotification('Напоминание', {
         body: t.text,

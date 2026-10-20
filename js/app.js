@@ -115,6 +115,9 @@ function setLastExport(ts) {
 
 // ===== Напоминания по времени =====
 
+// Напоминаем заранее — за 10 минут до указанного времени
+const REMIND_AHEAD_MS = 10 * 60 * 1000;
+
 const pad2 = (n) => String(n).padStart(2, '0');
 const dateInputValue = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 const timeInputValue = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
@@ -162,7 +165,7 @@ function buildIcs(ts, text) {
     'DTEND:' + icsDate(end),
     'SUMMARY:' + icsEscape(text),
     'BEGIN:VALARM',
-    'TRIGGER:-PT0M',
+    'TRIGGER:-PT10M',
     'ACTION:DISPLAY',
     'DESCRIPTION:' + icsEscape(text),
     'END:VALARM',
@@ -301,7 +304,7 @@ function reminderModal(task) {
           },
         }, '📅 Добавить в календарь'),
         el('p', { class: 'muted' },
-          'Событие с будильником: телефон напомнит даже при закрытом приложении и без интернета.'),
+          'Событие с будильником: телефон напомнит за 10 минут — даже при закрытом приложении и без интернета.'),
       ],
       actions,
       onCancel: () => resolve(null),
@@ -315,7 +318,9 @@ async function fireDueReminders() {
   let tasks;
   try { tasks = await DB.getAll('tasks'); } catch (e) { return; }
   const now = Date.now();
-  const due = tasks.filter((t) => t.remindAt && !t.done && !t.remindFired && t.remindAt <= now);
+  const due = tasks.filter(
+    (t) => t.remindAt && !t.done && !t.remindFired && t.remindAt - REMIND_AHEAD_MS <= now
+  );
   if (!due.length) { updateBadge(); return; }
   for (const t of due) {
     t.remindFired = true;
@@ -331,7 +336,9 @@ async function updateBadge() {
   try {
     if (!navigator.setAppBadge) return;
     const tasks = await DB.getAll('tasks');
-    const n = tasks.filter((t) => t.remindAt && !t.done && t.remindAt <= Date.now()).length;
+    const n = tasks.filter(
+      (t) => t.remindAt && !t.done && t.remindAt - REMIND_AHEAD_MS <= Date.now()
+    ).length;
     if (n) await navigator.setAppBadge(n);
     else if (navigator.clearAppBadge) await navigator.clearAppBadge();
   } catch (e) {}
@@ -343,10 +350,10 @@ async function scheduleReminders() {
   try { tasks = await DB.getAll('tasks'); } catch (e) { return; }
   const now = Date.now();
   const next = tasks
-    .filter((t) => t.remindAt && !t.done && !t.remindFired && t.remindAt > now)
+    .filter((t) => t.remindAt && !t.done && !t.remindFired && t.remindAt - REMIND_AHEAD_MS > now)
     .sort((a, b) => a.remindAt - b.remindAt)[0];
   if (!next) return;
-  const delay = Math.min(next.remindAt - now + 500, 2147000000);
+  const delay = Math.min(next.remindAt - REMIND_AHEAD_MS - now + 500, 2147000000);
   reminderTimer = setTimeout(async () => {
     await fireDueReminders();
     scheduleReminders();
@@ -651,8 +658,10 @@ async function renderTasks(root) {
         el('button', {
           type: 'button',
           class: 'task-remind' +
-            (t.remindAt ? (t.remindAt <= Date.now() && !t.done ? ' overdue' : ' set') : ''),
-          title: t.remindAt ? 'Изменить напоминание' : 'Добавить напоминание',
+            (t.remindAt
+              ? (t.remindAt - REMIND_AHEAD_MS <= Date.now() && !t.done ? ' overdue' : ' set')
+              : ''),
+          title: t.remindAt ? 'Изменить напоминание (за 10 минут)' : 'Добавить напоминание',
           'aria-label': t.remindAt ? 'Изменить напоминание' : 'Добавить напоминание',
           onClick: async (e) => {
             e.stopPropagation();
@@ -667,6 +676,7 @@ async function renderTasks(root) {
               setupPeriodicSync();
             }
             await DB.put('tasks', t);
+            await fireDueReminders();
             scheduleReminders();
             refresh();
           },
@@ -1751,7 +1761,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.5.2 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.5.3 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(themeSection, listsSection, backupSection, aboutSection);
