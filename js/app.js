@@ -113,254 +113,6 @@ function setLastExport(ts) {
   try { localStorage.setItem('lastExportAt', String(ts)); } catch (e) {}
 }
 
-// ===== Напоминания по времени =====
-
-// Напоминаем заранее — за 10 минут до указанного времени
-const REMIND_AHEAD_MS = 10 * 60 * 1000;
-
-const pad2 = (n) => String(n).padStart(2, '0');
-const dateInputValue = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const timeInputValue = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-
-function formatRemind(ts) {
-  const d = new Date(ts);
-  const now = new Date();
-  const sameDay = (a, b) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  const tomorrow = new Date(now);
-  tomorrow.setDate(now.getDate() + 1);
-  let day;
-  if (sameDay(d, now)) day = 'Сегодня';
-  else if (sameDay(d, tomorrow)) day = 'Завтра';
-  else day = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-  return `${day}, ${timeInputValue(d)}`;
-}
-
-// ===== Экспорт напоминания в календарь (.ics) =====
-
-function icsEscape(text) {
-  return String(text)
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\r?\n/g, '\\n');
-}
-
-function icsDate(ts) {
-  return new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-}
-
-function buildIcs(ts, text) {
-  const end = ts + 30 * 60 * 1000;
-  const uid = 'reminder-' + ts + '@info-storage';
-  return [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Info Storage//RU',
-    'CALSCALE:GREGORIAN',
-    'BEGIN:VEVENT',
-    'UID:' + uid,
-    'DTSTAMP:' + icsDate(Date.now()),
-    'DTSTART:' + icsDate(ts),
-    'DTEND:' + icsDate(end),
-    'SUMMARY:' + icsEscape(text),
-    'BEGIN:VALARM',
-    'TRIGGER:-PT10M',
-    'ACTION:DISPLAY',
-    'DESCRIPTION:' + icsEscape(text),
-    'END:VALARM',
-    'END:VEVENT',
-    'END:VCALENDAR',
-  ].join('\r\n');
-}
-
-async function exportToCalendar(ts, text) {
-  const content = buildIcs(ts, text);
-  const file = new File([content], 'reminder.ics', { type: 'text/calendar' });
-
-  // На Android удобнее «поделиться» прямо в календарь
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: text });
-      return true;
-    } catch (e) {
-      if (e && e.name === 'AbortError') return false;
-    }
-  }
-
-  const url = URL.createObjectURL(new Blob([content], { type: 'text/calendar' }));
-  const a = el('a', { href: url, download: 'reminder.ics' });
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast('Файл события сохранён — откройте его в календаре');
-  return true;
-}
-
-async function ensureNotifyPermission() {
-  try {
-    if (!('Notification' in window)) return false;
-    if (Notification.permission === 'granted') return true;
-    if (Notification.permission === 'denied') return false;
-    return (await Notification.requestPermission()) === 'granted';
-  } catch (e) {
-    return false;
-  }
-}
-
-async function setupPeriodicSync() {
-  try {
-    const reg = await navigator.serviceWorker.ready;
-    if (!reg.periodicSync) return;
-    const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
-    if (status.state !== 'granted') return;
-    const tags = await reg.periodicSync.getTags();
-    if (!tags.includes('check-reminders')) {
-      await reg.periodicSync.register('check-reminders', { minInterval: 15 * 60 * 1000 });
-    }
-  } catch (e) {}
-}
-
-async function showReminderNotification(task) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  try {
-    const reg = await navigator.serviceWorker.ready;
-    await reg.showNotification('Напоминание', {
-      body: task.text,
-      tag: 'task-' + task.id,
-      icon: './icons/icon-192.png',
-      badge: './icons/icon-192.png',
-      data: { url: './#/tasks' },
-    });
-  } catch (e) {
-    try { new Notification('Напоминание', { body: task.text }); } catch (e2) {}
-  }
-}
-
-function reminderModal(task) {
-  return new Promise((resolve) => {
-    const base = task.remindAt ? new Date(task.remindAt) : new Date();
-    const dateInput = el('input', { class: 'input', type: 'date', value: dateInputValue(base) });
-    const timeInput = el('input', {
-      class: 'input', type: 'time',
-      value: task.remindAt ? timeInputValue(base) : '09:00',
-    });
-
-    const preset = (label, d) =>
-      el('button', {
-        type: 'button',
-        class: 'btn btn-small',
-        onClick: () => { dateInput.value = dateInputValue(d); timeInput.value = timeInputValue(d); },
-      }, label);
-
-    const today18 = new Date();
-    today18.setHours(18, 0, 0, 0);
-    const tomorrow9 = new Date();
-    tomorrow9.setDate(tomorrow9.getDate() + 1);
-    tomorrow9.setHours(9, 0, 0, 0);
-    const inHour = new Date(Date.now() + 60 * 60 * 1000);
-
-    const actions = [];
-    if (task.remindAt) {
-      actions.push({ label: 'Убрать', onClick: ({ close }) => { close(); resolve('remove'); } });
-    }
-    actions.push({ label: 'Отмена', onClick: ({ close }) => { close(); resolve(null); } });
-    actions.push({
-      label: 'Готово',
-      class: 'btn btn-primary',
-      onClick: async ({ close }) => {
-        const d = dateInput.value;
-        const t = timeInput.value;
-        if (!d || !t) { toast('Укажите дату и время'); return; }
-        const ts = new Date(`${d}T${t}`).getTime();
-        if (!ts || isNaN(ts)) { toast('Некорректная дата'); return; }
-        await ensureNotifyPermission();
-        close();
-        resolve(ts);
-      },
-    });
-
-    modal({
-      title: 'Напоминание',
-      content: [
-        el('div', { class: 'field-group' }, el('label', { class: 'field-label' }, 'Дата'), dateInput),
-        el('div', { class: 'field-group' }, el('label', { class: 'field-label' }, 'Время'), timeInput),
-        el('div', { class: 'presets' },
-          preset('Через час', inHour),
-          preset('Сегодня 18:00', today18),
-          preset('Завтра 09:00', tomorrow9)
-        ),
-        el('button', {
-          type: 'button',
-          class: 'btn btn-block',
-          onClick: async () => {
-            const d = dateInput.value;
-            const t = timeInput.value;
-            if (!d || !t) { toast('Укажите дату и время'); return; }
-            const ts = new Date(`${d}T${t}`).getTime();
-            if (!ts || isNaN(ts)) { toast('Некорректная дата'); return; }
-            await exportToCalendar(ts, task.text);
-          },
-        }, '📅 Добавить в календарь'),
-        el('p', { class: 'muted' },
-          'Событие с будильником: телефон напомнит за 10 минут — даже при закрытом приложении и без интернета.'),
-      ],
-      actions,
-      onCancel: () => resolve(null),
-    });
-  });
-}
-
-let reminderTimer = null;
-
-async function fireDueReminders() {
-  let tasks;
-  try { tasks = await DB.getAll('tasks'); } catch (e) { return; }
-  const now = Date.now();
-  const due = tasks.filter(
-    (t) => t.remindAt && !t.done && !t.remindFired && t.remindAt - REMIND_AHEAD_MS <= now
-  );
-  if (!due.length) { updateBadge(); return; }
-  for (const t of due) {
-    t.remindFired = true;
-    await DB.put('tasks', t);
-    await showReminderNotification(t);
-  }
-  toast(due.length === 1 ? 'Напоминание: ' + due[0].text : `Напоминаний: ${due.length}`);
-  updateBadge();
-}
-
-// Бейдж на иконке приложения — число просроченных напоминаний
-async function updateBadge() {
-  try {
-    if (!navigator.setAppBadge) return;
-    const tasks = await DB.getAll('tasks');
-    const n = tasks.filter(
-      (t) => t.remindAt && !t.done && t.remindAt - REMIND_AHEAD_MS <= Date.now()
-    ).length;
-    if (n) await navigator.setAppBadge(n);
-    else if (navigator.clearAppBadge) await navigator.clearAppBadge();
-  } catch (e) {}
-}
-
-async function scheduleReminders() {
-  if (reminderTimer) { clearTimeout(reminderTimer); reminderTimer = null; }
-  let tasks;
-  try { tasks = await DB.getAll('tasks'); } catch (e) { return; }
-  const now = Date.now();
-  const next = tasks
-    .filter((t) => t.remindAt && !t.done && !t.remindFired && t.remindAt - REMIND_AHEAD_MS > now)
-    .sort((a, b) => a.remindAt - b.remindAt)[0];
-  if (!next) return;
-  const delay = Math.min(next.remindAt - REMIND_AHEAD_MS - now + 500, 2147000000);
-  reminderTimer = setTimeout(async () => {
-    await fireDueReminders();
-    scheduleReminders();
-  }, delay);
-  updateBadge();
-}
-
 // ===== Общие компоненты =====
 
 function header({ title, color = null, back = null, actions = [] }) {
@@ -642,7 +394,6 @@ async function renderTasks(root) {
             t.done = !t.done;
             t.completedAt = t.done ? Date.now() : null;
             await DB.put('tasks', t);
-            scheduleReminders();
             vibrate(10);
             refresh();
           },
@@ -657,39 +408,12 @@ async function renderTasks(root) {
         }, t.text),
         el('button', {
           type: 'button',
-          class: 'task-remind' +
-            (t.remindAt
-              ? (t.remindAt - REMIND_AHEAD_MS <= Date.now() && !t.done ? ' overdue' : ' set')
-              : ''),
-          title: t.remindAt ? 'Изменить напоминание (за 10 минут)' : 'Добавить напоминание',
-          'aria-label': t.remindAt ? 'Изменить напоминание' : 'Добавить напоминание',
-          onClick: async (e) => {
-            e.stopPropagation();
-            const res = await reminderModal(t);
-            if (res === null) return;
-            if (res === 'remove') {
-              delete t.remindAt;
-              t.remindFired = false;
-            } else {
-              t.remindAt = res;
-              t.remindFired = false;
-              setupPeriodicSync();
-            }
-            await DB.put('tasks', t);
-            await fireDueReminders();
-            scheduleReminders();
-            refresh();
-          },
-        }, t.remindAt ? formatRemind(t.remindAt) : '⏰'),
-        el('button', {
-          type: 'button',
           class: 'icon-btn danger',
           'aria-label': 'Удалить задачу',
           onClick: async () => {
             await DB.del('tasks', t.id);
             const i = tasks.findIndex((x) => x.id === t.id);
             if (i >= 0) tasks.splice(i, 1);
-            scheduleReminders();
             toast('Задача удалена');
             refresh();
           },
@@ -1761,7 +1485,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.5.3 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.6.0 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(themeSection, listsSection, backupSection, aboutSection);
@@ -1802,26 +1526,10 @@ async function route() {
 window.addEventListener('hashchange', route);
 route();
 
-// Напоминания: показываем просроченные и планируем ближайшее
-fireDueReminders();
-scheduleReminders();
-setupPeriodicSync();
-
-// Пока страница жива (в т.ч. свёрнута), проверяем раз в минуту:
-// таймеры в фоне браузер «разрежает», но не всегда останавливает.
-setInterval(fireDueReminders, 60 * 1000);
-
-// Просим браузер не вытеснять данные (напоминания и записи)
+// Просим браузер не вытеснять данные (записи и задачи)
 try {
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 } catch (e) {}
-
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    fireDueReminders();
-    scheduleReminders();
-  }
-});
 
 // Тема: применяем сохранённую настройку и следим за системной
 (function initTheme() {
