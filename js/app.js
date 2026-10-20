@@ -240,13 +240,25 @@ async function fireDueReminders() {
   try { tasks = await DB.getAll('tasks'); } catch (e) { return; }
   const now = Date.now();
   const due = tasks.filter((t) => t.remindAt && !t.done && !t.remindFired && t.remindAt <= now);
-  if (!due.length) return;
+  if (!due.length) { updateBadge(); return; }
   for (const t of due) {
     t.remindFired = true;
     await DB.put('tasks', t);
     await showReminderNotification(t);
   }
   toast(due.length === 1 ? 'Напоминание: ' + due[0].text : `Напоминаний: ${due.length}`);
+  updateBadge();
+}
+
+// Бейдж на иконке приложения — число просроченных напоминаний
+async function updateBadge() {
+  try {
+    if (!navigator.setAppBadge) return;
+    const tasks = await DB.getAll('tasks');
+    const n = tasks.filter((t) => t.remindAt && !t.done && t.remindAt <= Date.now()).length;
+    if (n) await navigator.setAppBadge(n);
+    else if (navigator.clearAppBadge) await navigator.clearAppBadge();
+  } catch (e) {}
 }
 
 async function scheduleReminders() {
@@ -263,6 +275,7 @@ async function scheduleReminders() {
     await fireDueReminders();
     scheduleReminders();
   }, delay);
+  updateBadge();
 }
 
 // ===== Общие компоненты =====
@@ -1662,7 +1675,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.5.0 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.5.1 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(themeSection, listsSection, backupSection, aboutSection);
@@ -1707,6 +1720,16 @@ route();
 fireDueReminders();
 scheduleReminders();
 setupPeriodicSync();
+
+// Пока страница жива (в т.ч. свёрнута), проверяем раз в минуту:
+// таймеры в фоне браузер «разрежает», но не всегда останавливает.
+setInterval(fireDueReminders, 60 * 1000);
+
+// Просим браузер не вытеснять данные (напоминания и записи)
+try {
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+} catch (e) {}
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     fireDueReminders();
