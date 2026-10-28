@@ -1360,6 +1360,23 @@ async function exportExcel() {
       return cells;
     });
 
+    // Сортировка: сначала по названию папки (пустые — в конец, как в Excel),
+    // внутри одной папки — по названию записи.
+    const titleField = getTitleField(folder);
+    const titleIndex = titleField ? 1 + folder.fields.indexOf(titleField) : 1;
+    rows.sort((a, b) => {
+      const pa = String(a[0] || '');
+      const pb = String(b[0] || '');
+      if (pa !== pb) {
+        if (!pa) return 1;
+        if (!pb) return -1;
+        return pa.localeCompare(pb, 'ru', { numeric: true });
+      }
+      return String(a[titleIndex] || '').localeCompare(
+        String(b[titleIndex] || ''), 'ru', { numeric: true }
+      );
+    });
+
     return { name: uniqueSheetName(folder.name, used), columns, rows };
   });
 
@@ -1560,7 +1577,7 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.6.1 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.6.2 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
   );
 
   main.append(themeSection, listsSection, excelSection, backupSection, aboutSection);
