@@ -2,6 +2,7 @@
 
 import * as DB from './db.js';
 import { el, modal, confirmModal, promptModal, toast, plural } from './ui.js';
+import { downloadXlsx } from './xlsx.js';
 
 const FIELD_TYPES = {
   text: 'Текст',
@@ -1302,6 +1303,71 @@ async function renderFolderEditor(root, folderId) {
   );
 }
 
+// ===== Экспорт в Excel =====
+
+// Имя листа Excel: до 31 символа, без запрещённых знаков, уникальное
+function uniqueSheetName(name, used) {
+  const base =
+    String(name || 'Лист')
+      .replace(/[\\/?*[\]:]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 31) || 'Лист';
+  let candidate = base;
+  let i = 2;
+  while (used.has(candidate.toLowerCase())) {
+    const suffix = ` (${i++})`;
+    candidate = base.slice(0, 31 - suffix.length) + suffix;
+  }
+  used.add(candidate.toLowerCase());
+  return candidate;
+}
+
+async function exportExcel() {
+  const [folders, groups, records] = await Promise.all([
+    DB.getAll('folders'), DB.getAll('groups'), DB.getAll('records'),
+  ]);
+  if (!folders.length) {
+    toast('Нет хранилищ для экспорта');
+    return;
+  }
+
+  const used = new Set();
+  const sheets = folders.map((folder) => {
+    const recs = records.filter((r) => r.folderId === folder.id);
+    const columns = ['Папка', ...folder.fields.map((f) => f.name), 'Примечание'];
+
+    const rows = recs.map((r) => {
+      const ids = r.groupId ? pathIdsFor(groups, r.groupId) : [];
+      const path = ids
+        .map((id) => (groups.find((g) => g.id === id) || {}).name)
+        .filter(Boolean)
+        .join(' / ');
+
+      const cells = [path];
+      folder.fields.forEach((f) => {
+        const v = r.values[f.id];
+        if (f.type === 'checkbox') {
+          cells.push(v ? 'Да' : 'Нет');
+        } else if (f.type === 'number') {
+          const n = Number(v);
+          cells.push(v !== '' && v !== null && v !== undefined && !isNaN(n) ? n : (v ?? ''));
+        } else {
+          cells.push(v ?? '');
+        }
+      });
+      cells.push(r.note || '');
+      return cells;
+    });
+
+    return { name: uniqueSheetName(folder.name, used), columns, rows };
+  });
+
+  const date = new Date().toISOString().slice(0, 10);
+  downloadXlsx(`info-storage-${date}.xlsx`, sheets);
+  toast('Excel-файл сохранён');
+}
+
 // ===== Экран: настройки =====
 
 async function renderSettings(root) {
@@ -1418,6 +1484,15 @@ async function renderSettings(root) {
     }, '＋ Новый список')
   );
 
+  // --- Экспорт в Excel ---
+  const excelSection = el('section', { class: 'card' },
+    el('h2', {}, 'Экспорт в Excel'),
+    el('p', { class: 'muted' },
+      'Каждое хранилище — отдельный лист со всеми полями. Записи из вложенных папок тоже попадут (с колонкой «Папка»).'),
+    el('button', { type: 'button', class: 'btn btn-block', onClick: exportExcel },
+      'Скачать Excel (.xlsx)')
+  );
+
   // --- Резервные копии ---
   const fileInput = el('input', {
     type: 'file',
@@ -1485,10 +1560,10 @@ async function renderSettings(root) {
   // --- О приложении ---
   const aboutSection = el('section', { class: 'card' },
     el('h2', {}, 'О приложении'),
-    el('p', { class: 'muted' }, 'Хранилище v1.6.0 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
+    el('p', { class: 'muted' }, 'Хранилище v1.6.1 (экспериментальная ветка). Работает офлайн, данные не покидают устройство.')
   );
 
-  main.append(themeSection, listsSection, backupSection, aboutSection);
+  main.append(themeSection, listsSection, excelSection, backupSection, aboutSection);
   root.append(main);
 }
 

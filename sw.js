@@ -1,5 +1,5 @@
 // Service Worker: офлайн-кэш приложения «Хранилище»
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 const CACHE = 'info-storage-' + VERSION;
 
 const ASSETS = [
@@ -10,6 +10,7 @@ const ASSETS = [
   './js/db.js',
   './js/ui.js',
   './js/app.js',
+  './js/xlsx.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-512-maskable.png',
